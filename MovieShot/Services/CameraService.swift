@@ -1,4 +1,4 @@
-@preconcurrency import AVFoundation
+@preconcurrency internal import AVFoundation
 import Combine
 import Foundation
 import UIKit
@@ -20,12 +20,10 @@ final class CameraService: NSObject, ObservableObject {
     @Published private(set) var availableLenses: [CameraLens] = []
     @Published private(set) var currentPosition: AVCaptureDevice.Position = .back
     @Published private(set) var selectedLens: CameraLens?
-    /// Incremented each time the active camera device changes, so the preview view can re-evaluate rotation.
     @Published private(set) var deviceChangeCount = 0
 
     let session = AVCaptureSession()
-    /// Callback delivers (hevcImage, rawDNGData?). rawDNGData is non-nil when RAW capture succeeded.
-    var onPhoto: ((UIImage, Data?) -> Void)?
+    var onPhoto: ((UIImage) -> Void)?
 
     private let photoOutput = AVCapturePhotoOutput()
     private var currentInput: AVCaptureDeviceInput?
@@ -33,16 +31,80 @@ final class CameraService: NSObject, ObservableObject {
     private var captureRotationCoordinator: AVCaptureDevice.RotationCoordinator?
     private var captureRotationObservation: NSKeyValueObservation?
 
-    /// Tracks in-flight RAW+HEVC captures (RAW fires two didFinishProcessingPhoto callbacks).
-    private struct PendingCapture {
-        var hevcImage: UIImage?
-        var rawData: Data?
-    }
-    private var pendingCaptures: [Int64: PendingCapture] = [:]
+    private var activeProcessors: [Int64: PhotoCaptureProcessor] = [:]
+
+    private let backDiscoverySession: AVCaptureDevice.DiscoverySession
+    private let frontDiscoverySession: AVCaptureDevice.DiscoverySession
+
+    private let sessionQueue = DispatchQueue(label: "com.movieshot.session")
 
     override init() {
+        let physicalTypes: [AVCaptureDevice.DeviceType] = [
+            .builtInUltraWideCamera,
+            .builtInWideAngleCamera,
+            .builtInTelephotoCamera,
+        ]
+        self.backDiscoverySession = AVCaptureDevice.DiscoverySession(
+            deviceTypes: physicalTypes,
+            mediaType: .video,
+            position: .back
+        )
+
+        let frontTypes: [AVCaptureDevice.DeviceType] = [
+            .builtInWideAngleCamera,
+            .builtInTrueDepthCamera,
+        ]
+        self.frontDiscoverySession = AVCaptureDevice.DiscoverySession(
+            deviceTypes: frontTypes,
+            mediaType: .video,
+            position: .front
+        )
+
         super.init()
         session.sessionPreset = .photo
+
+        // Pre-populate lenses synchronously so the UI is never empty on first render.
+        // DiscoverySession.devices is safe to read on any thread.
+        availableLenses = buildLenses(for: .back)
+    }
+
+    func capturePhoto() {
+        guard isSessionRunning else { return }
+
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+
+            let settings: AVCapturePhotoSettings
+            if self.photoOutput.availablePhotoCodecTypes.contains(.hevc) {
+                settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.hevc])
+            } else {
+                settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
+            }
+
+            if let connection = self.photoOutput.connection(with: .video),
+               connection.isVideoMirroringSupported {
+                connection.isVideoMirrored = self.currentPosition == .front
+            }
+
+            let outputDimensions = self.photoOutput.maxPhotoDimensions
+            if outputDimensions.width > 0 && outputDimensions.height > 0 {
+                settings.maxPhotoDimensions = outputDimensions
+            }
+            settings.photoQualityPrioritization = .balanced
+
+            let processor = PhotoCaptureProcessor(with: settings) { [weak self] hevcData in
+                guard let self else { return }
+                self.activeProcessors[settings.uniqueID] = nil
+                if let hevcData, let image = UIImage(data: hevcData) {
+                    self.onPhoto?(image)
+                } else {
+                    print("CameraService: Photo capture failed (no data)")
+                }
+            }
+
+            self.activeProcessors[settings.uniqueID] = processor
+            self.photoOutput.capturePhoto(with: settings, delegate: processor)
+        }
     }
 
     func requestPermissionIfNeeded() {
@@ -70,30 +132,35 @@ final class CameraService: NSObject, ObservableObject {
     }
 
     func configureSessionIfNeeded() {
-        guard !isConfigured else { return }
         guard authorizationStatus == .authorized else { return }
 
-        session.beginConfiguration()
-        defer {
-            session.commitConfiguration()
-            isConfigured = true
-        }
+        sessionQueue.async { [weak self] in
+            guard let self, !self.isConfigured else { return }
 
-        if session.canAddOutput(photoOutput) {
-            session.addOutput(photoOutput)
-        }
+            // Add output in its own configuration block
+            self.session.beginConfiguration()
+            if self.session.canAddOutput(self.photoOutput) {
+                self.session.addOutput(self.photoOutput)
+            }
+            self.session.commitConfiguration()
 
-        currentPosition = .back
-        reloadLenses(for: currentPosition)
-        configureInput(for: selectedLens ?? availableLenses.first)
+            self.isConfigured = true
+
+            // Configure initial input separately (has its own begin/commit)
+            let initialPosition: AVCaptureDevice.Position = .back
+            let lenses = self.reloadLenses(for: initialPosition)
+            self.configureInput(for: lenses.first)
+
+            DispatchQueue.main.async {
+                self.currentPosition = initialPosition
+            }
+        }
     }
 
-    private let sessionQueue = DispatchQueue(label: "com.movieshot.session")
-
     func startSession() {
-        guard isConfigured, !session.isRunning else { return }
-        sessionQueue.async { [self] in
-            session.startRunning()
+        sessionQueue.async { [weak self] in
+            guard let self, self.isConfigured, !self.session.isRunning else { return }
+            self.session.startRunning()
             DispatchQueue.main.async {
                 self.isSessionRunning = self.session.isRunning
             }
@@ -101,9 +168,9 @@ final class CameraService: NSObject, ObservableObject {
     }
 
     func stopSession() {
-        guard session.isRunning else { return }
-        sessionQueue.async { [self] in
-            session.stopRunning()
+        sessionQueue.async { [weak self] in
+            guard let self, self.session.isRunning else { return }
+            self.session.stopRunning()
             DispatchQueue.main.async {
                 self.isSessionRunning = self.session.isRunning
             }
@@ -111,75 +178,30 @@ final class CameraService: NSObject, ObservableObject {
     }
 
     func togglePosition() {
-        currentPosition = currentPosition == .back ? .front : .back
-        reloadLenses(for: currentPosition)
-        configureInput(for: selectedLens ?? availableLenses.first)
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            let newPosition: AVCaptureDevice.Position = self.currentPosition == .back ? .front : .back
+            let lenses = self.reloadLenses(for: newPosition)
+            self.configureInput(for: lenses.first)
+            DispatchQueue.main.async {
+                self.currentPosition = newPosition
+            }
+        }
     }
 
     func selectLens(_ lens: CameraLens) {
-        guard lens.position == currentPosition else { return }
-        configureInput(for: lens)
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            guard lens.position == self.currentPosition else { return }
+            self.configureInput(for: lens)
+        }
     }
 
-    @Published var isRawEnabled = true
-    
-    // ... (existing properties)
+    // MARK: - Private
 
-    func capturePhoto() {
-        guard isSessionRunning else { return }
-
-        let settings: AVCapturePhotoSettings
-
-        // Always capture RAW + HEVC when RAW is available (better data for editing)
-        // BUT only if the user has enabled RAW capture.
-        if isRawEnabled, let rawType = photoOutput.availableRawPhotoPixelFormatTypes.first {
-            settings = AVCapturePhotoSettings(
-                rawPixelFormatType: rawType,
-                processedFormat: [AVVideoCodecKey: AVVideoCodecType.hevc]
-            )
-        } else {
-            settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.hevc])
-        }
-
-        // Capture rotation is continuously updated via KVO on captureRotationCoordinator.
-        // Only need to handle mirroring here.
-        if let connection = photoOutput.connection(with: .video) {
-            if connection.isVideoMirroringSupported {
-                connection.isVideoMirrored = currentPosition == .front
-            }
-        }
-
-        settings.maxPhotoDimensions = photoOutput.maxPhotoDimensions
-        
-        // photoQualityPrioritization is unsupported when capturing RAW
-        if settings.rawPhotoPixelFormatType == 0 {
-            // When not capturing RAW, we can use the camera's processing smarts (Night Mode etc)
-            settings.photoQualityPrioritization = .balanced
-        }
-        
-        photoOutput.capturePhoto(with: settings, delegate: self)
-    }
-
-    private func reloadLenses(for position: AVCaptureDevice.Position) {
-        // Only discover individual physical lenses — skip compound devices (Triple, Dual, etc.)
-        let physicalTypes: [AVCaptureDevice.DeviceType] = [
-            .builtInUltraWideCamera,
-            .builtInWideAngleCamera,
-            .builtInTelephotoCamera,
-        ]
-
-        let frontTypes: [AVCaptureDevice.DeviceType] = [
-            .builtInWideAngleCamera,
-            .builtInTrueDepthCamera,
-        ]
-
-        let deviceTypes = position == .back ? physicalTypes : frontTypes
-
-        let discovery = AVCaptureDevice.DiscoverySession(
-            deviceTypes: deviceTypes,
-            mediaType: .video,
-            position: position
-        )
+    /// Builds the lens list without any side-effects. Safe to call from any thread.
+    private func buildLenses(for position: AVCaptureDevice.Position) -> [CameraLens] {
+        let discovery = position == .back ? backDiscoverySession : frontDiscoverySession
 
         let uniqueDevices = Dictionary(grouping: discovery.devices, by: \.deviceType)
             .compactMap { $0.value.first }
@@ -196,29 +218,35 @@ final class CameraService: NSObject, ObservableObject {
             )
         }
 
-        // Add a 2x crop lens on the back wide-angle camera
-        if position == .back {
-            let hasWide = uniqueDevices.contains { $0.deviceType == .builtInWideAngleCamera }
-            if hasWide {
-                lenses.append(CameraLens(
-                    id: "\(position.rawValue)-wide-2x",
-                    name: "2×",
-                    deviceType: .builtInWideAngleCamera,
-                    position: position,
-                    zoomFactor: 2.0,
-                    sortOrder: 15
-                ))
-            }
+        // Digital crop lenses on the wide-angle camera
+        if position == .back, uniqueDevices.contains(where: { $0.deviceType == .builtInWideAngleCamera }) {
+            lenses.append(CameraLens(
+                id: "\(position.rawValue)-wide-1.5x",
+                name: "35mm",
+                deviceType: .builtInWideAngleCamera,
+                position: position,
+                zoomFactor: 1.5,
+                sortOrder: 10
+            ))
+            lenses.append(CameraLens(
+                id: "\(position.rawValue)-wide-2x",
+                name: "50mm",
+                deviceType: .builtInWideAngleCamera,
+                position: position,
+                zoomFactor: 2.0,
+                sortOrder: 15
+            ))
         }
 
-        availableLenses = lenses.sorted { $0.sortOrder < $1.sortOrder }
+        return lenses.sorted { $0.sortOrder < $1.sortOrder }
+    }
 
-        if let selectedLens, availableLenses.contains(selectedLens) {
-            return
+    private func reloadLenses(for position: AVCaptureDevice.Position) -> [CameraLens] {
+        let sorted = buildLenses(for: position)
+        DispatchQueue.main.async {
+            self.availableLenses = sorted
         }
-        // Default to Wide (1x)
-        selectedLens = availableLenses.first { $0.deviceType == .builtInWideAngleCamera && $0.zoomFactor == 1.0 }
-            ?? availableLenses.first
+        return sorted
     }
 
     private func configureInput(for lens: CameraLens?) {
@@ -226,15 +254,18 @@ final class CameraService: NSObject, ObservableObject {
 
         guard let device = AVCaptureDevice.default(lens.deviceType, for: .video, position: lens.position)
                 ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: lens.position)
-        else {
-            return
+        else { return }
+
+        defer {
+            DispatchQueue.main.async {
+                self.selectedLens = lens
+            }
         }
 
-        // If the device is already active (e.g. switching between 1× and 2× on the same wide lens),
-        // just update the zoom factor without reconfiguring the session.
+        // Same physical device — just update zoom, no session reconfiguration needed
         if let currentInput, currentInput.device == device {
             applyZoom(lens.zoomFactor, to: device)
-            selectedLens = lens
+            updateMaxPhotoDimensions()
             return
         }
 
@@ -243,22 +274,28 @@ final class CameraService: NSObject, ObservableObject {
             session.beginConfiguration()
             defer {
                 session.commitConfiguration()
-                selectedLens = lens
                 updateMaxPhotoDimensions()
             }
 
             if let currentInput {
                 session.removeInput(currentInput)
+                self.currentInput = nil
             }
 
-            guard session.canAddInput(input) else { return }
+            guard session.canAddInput(input) else {
+                print("CameraService: canAddInput failed for \(lens.name)")
+                return
+            }
             session.addInput(input)
             currentInput = input
             applyZoom(lens.zoomFactor, to: device)
             setupCaptureRotationCoordinator(for: device)
-            deviceChangeCount += 1
+
+            DispatchQueue.main.async {
+                self.deviceChangeCount += 1
+            }
         } catch {
-            print("Camera input error: \(error)")
+            print("CameraService: input error: \(error)")
         }
     }
 
@@ -268,36 +305,41 @@ final class CameraService: NSObject, ObservableObject {
             device.videoZoomFactor = min(factor, device.activeFormat.videoMaxZoomFactor)
             device.unlockForConfiguration()
         } catch {
-            print("Zoom error: \(error)")
+            print("CameraService: zoom error: \(error)")
         }
     }
 
-    /// 12MP cap: 4032×3024 (standard iPhone 12MP).
+    /// 12MP cap: 4032×3024
     private static let maxPixelCount: Int32 = 4032 * 3024
 
     private func updateMaxPhotoDimensions() {
         guard let device = currentInput?.device else { return }
 
-        // Find the largest supported dimensions that don't exceed 12MP.
         let supported = device.activeFormat.supportedMaxPhotoDimensions
+        guard !supported.isEmpty else { return }
+
+        // Pick the largest supported size up to 12MP; fall back to the smallest if none fit.
         let capped = supported
             .filter { $0.width * $0.height <= Self.maxPixelCount }
             .max(by: { $0.width * $0.height < $1.width * $1.height })
 
-        // If nothing fits under 12MP (shouldn't happen), pick the smallest available.
         let dimensions = capped ?? supported.min(by: { $0.width * $0.height < $1.width * $1.height })
         guard let dimensions else { return }
-        photoOutput.maxPhotoDimensions = dimensions
+
+        // Only update if the value actually changed — avoids a crash when the
+        // current value is already valid for the new format.
+        let current = photoOutput.maxPhotoDimensions
+        if current.width != dimensions.width || current.height != dimensions.height {
+            photoOutput.maxPhotoDimensions = dimensions
+        }
     }
 
     private func lensInfo(for type: AVCaptureDevice.DeviceType, position: AVCaptureDevice.Position) -> (name: String, sortOrder: Int) {
-        if position == .front {
-            return ("Front", 0)
-        }
+        if position == .front { return ("Front", 0) }
         switch type {
-        case .builtInUltraWideCamera: return ("Ultra Wide", 0)
-        case .builtInWideAngleCamera: return ("Wide", 10)
-        case .builtInTelephotoCamera: return ("Tele", 30)
+        case .builtInUltraWideCamera: return ("14mm", 5)
+        case .builtInWideAngleCamera: return ("24mm", 0)  // sortOrder 0 = default first lens
+        case .builtInTelephotoCamera: return ("Tele", 20)
         default: return ("Camera", 50)
         }
     }
@@ -309,62 +351,23 @@ final class CameraService: NSObject, ObservableObject {
         let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: nil)
         captureRotationCoordinator = coordinator
 
-        // Apply initial capture rotation angle
         applyCaptureRotation(coordinator.videoRotationAngleForHorizonLevelCapture)
 
-        // Continuously update capture rotation via KVO
         captureRotationObservation = coordinator.observe(
             \.videoRotationAngleForHorizonLevelCapture,
             options: [.new]
         ) { [weak self] coord, _ in
-            self?.applyCaptureRotation(coord.videoRotationAngleForHorizonLevelCapture)
+            let angle = coord.videoRotationAngleForHorizonLevelCapture
+            self?.sessionQueue.async {
+                self?.applyCaptureRotation(angle)
+            }
         }
     }
 
     private func applyCaptureRotation(_ angle: CGFloat) {
         guard let connection = photoOutput.connection(with: .video) else { return }
-        guard connection.isVideoRotationAngleSupported(angle) else { return }
-        connection.videoRotationAngle = angle
-    }
-}
-
-extension CameraService: AVCapturePhotoCaptureDelegate {
-    func photoOutput(
-        _ output: AVCapturePhotoOutput,
-        didFinishProcessingPhoto photo: AVCapturePhoto,
-        error: Error?
-    ) {
-        guard error == nil else { return }
-
-        let captureID = photo.resolvedSettings.uniqueID
-        var pending = pendingCaptures[captureID] ?? PendingCapture()
-
-        if photo.isRawPhoto {
-            // Store the DNG data for RAW-based editing
-            pending.rawData = photo.fileDataRepresentation()
-        } else if let data = photo.fileDataRepresentation(),
-                  let image = UIImage(data: data) {
-            pending.hevcImage = image
-        }
-
-        pendingCaptures[captureID] = pending
-    }
-
-    func photoOutput(
-        _ output: AVCapturePhotoOutput,
-        didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings,
-        error: Error?
-    ) {
-        let captureID = resolvedSettings.uniqueID
-        guard let pending = pendingCaptures.removeValue(forKey: captureID),
-              let image = pending.hevcImage
-        else {
-            pendingCaptures[captureID] = nil
-            return
-        }
-
-        DispatchQueue.main.async { [weak self] in
-            self?.onPhoto?(image, pending.rawData)
+        if connection.isVideoRotationAngleSupported(angle) {
+            connection.videoRotationAngle = angle
         }
     }
 }

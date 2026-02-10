@@ -16,12 +16,6 @@ final class EditorViewModel: ObservableObject {
         didSet { applyEdits() }
     }
     @Published var editedImage: UIImage?
-    /// RAW DNG data from camera — used as editing source for better quality.
-    private var rawCIImage: CIImage?
-    /// Full-res RAW CIImage for export.
-    private var fullResRawCIImage: CIImage?
-    /// Whether the current source was captured in RAW.
-    @Published private(set) var isRAWSource = false
     @Published var selectedPreset: MoviePreset = .matrix {
         didSet { applyEdits() }
     }
@@ -55,12 +49,15 @@ final class EditorViewModel: ObservableObject {
     @Published var showPresetLoading = false
 
     var cameraService = CameraService()
+    // CIContext is thread-safe and expensive to create, so we keep one instance.
     private let context = CIContext()
+    
     private var loadingTask: Task<Void, Never>?
+    private var editTask: Task<Void, Never>?
 
     init() {
-        cameraService.onPhoto = { [weak self] image, rawData in
-            self?.setSourceImage(image, rawData: rawData)
+        cameraService.onPhoto = { [weak self] image in
+            self?.setSourceImage(image)
         }
     }
 
@@ -76,48 +73,32 @@ final class EditorViewModel: ObservableObject {
         cameraService.capturePhoto()
     }
 
-    func setSourceImage(_ image: UIImage, rawData: Data? = nil) {
+    func setSourceImage(_ image: UIImage) {
         loadingTask?.cancel()
-        let normalized = image.normalizedUpOrientation()
-        // Cap full-res at 12MP (4032px longest edge) for export
-        fullResSourceImage = normalized.downscaledForEditing(maxDimension: 4032)
-        sourceImage = normalized.downscaledForEditing(maxDimension: 2500)
 
-        // If RAW DNG data is available, create CIImages from it for editing
-        if let rawData,
-           let rawFilter = CIRAWFilter(imageData: rawData, identifierHint: "com.adobe.raw-image") {
-            rawFilter.extendedDynamicRangeAmount = 0.0
-            rawFilter.baselineExposure = 0.0
-            if let fullRaw = rawFilter.outputImage {
-                fullResRawCIImage = fullRaw
-                // Downscale for preview by clamping longest edge
-                let maxSide = Swift.max(fullRaw.extent.width, fullRaw.extent.height)
-                if maxSide > 2500 {
-                    let scale = 2500.0 / maxSide
-                    rawCIImage = fullRaw.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-                } else {
-                    rawCIImage = fullRaw
+        let context = self.context
+
+        loadingTask = Task.detached(priority: .userInitiated) {
+            let worker = ImageWorker(context: context)
+            let normalized = await worker.normalizedUpOrientation(for: image)
+            let fullRes = await worker.downscaled(image: normalized, maxDimension: 4032)
+            let preview = await worker.downscaled(image: normalized, maxDimension: 2500)
+
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.fullResSourceImage = fullRes
+                self.sourceImage = preview
+
+                self.cameraService.stopSession()
+                self.showPresetLoading = true
+
+                self.loadingTask = Task {
+                    try? await Task.sleep(nanoseconds: 700_000_000)
+                    guard !Task.isCancelled else { return }
+                    self.showPresetLoading = false
+                    self.step = .preset
                 }
-                isRAWSource = true
-            } else {
-                rawCIImage = nil
-                fullResRawCIImage = nil
-                isRAWSource = false
             }
-        } else {
-            rawCIImage = nil
-            fullResRawCIImage = nil
-            isRAWSource = false
-        }
-
-        cameraService.stopSession()
-        showPresetLoading = true
-
-        loadingTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 700_000_000)
-            guard let self, !Task.isCancelled else { return }
-            self.showPresetLoading = false
-            self.step = .preset
         }
     }
 
@@ -133,13 +114,11 @@ final class EditorViewModel: ObservableObject {
 
     func restart() {
         loadingTask?.cancel()
+        editTask?.cancel()
         step = .source
         fullResSourceImage = nil
         sourceImage = nil
         editedImage = nil
-        rawCIImage = nil
-        fullResRawCIImage = nil
-        isRAWSource = false
         selectedPreset = .matrix
         exposure = 0.0
         contrast = 0.0
@@ -156,24 +135,32 @@ final class EditorViewModel: ObservableObject {
     /// Renders the current edits at full resolution for export (JPEG output).
     /// Prefers RAW source for maximum quality.
     func renderFullResolution() -> UIImage? {
-        // Prefer full-res RAW CIImage over HEVC UIImage
         let inputImage: CIImage
-        if let fullResRawCIImage {
-            inputImage = fullResRawCIImage
-        } else if let fullRes = fullResSourceImage, let ci = CIImage(image: fullRes) {
+        if let fullRes = fullResSourceImage, let ci = CIImage(image: fullRes) {
             inputImage = ci
         } else {
             return editedImage
         }
 
         return autoreleasepool {
-            let output = applyFilterChain(to: inputImage)
+            let output = applyFilterChain(
+                to: inputImage,
+                preset: selectedPreset,
+                exposure: exposure,
+                contrast: contrast,
+                shadows: shadows,
+                highlights: highlights,
+                cropOption: cropOption,
+                cropOffset: cropOffset
+            )
             guard let cgImage = context.createCGImage(output, from: output.extent) else {
                 return fullResSourceImage
             }
             return UIImage(cgImage: cgImage)
         }
     }
+    
+    // ... rest of class functions ...
 
     func saveToLibrary() {
         guard let image = renderFullResolution() else { return }
@@ -214,35 +201,80 @@ final class EditorViewModel: ObservableObject {
     }
 
     private func applyEdits() {
-        guard sourceImage != nil else {
+        editTask?.cancel()
+        
+        guard let sourceImage else {
             editedImage = nil
             return
         }
-        // Prefer RAW CIImage (14-bit sensor data) over HEVC UIImage (8-bit)
-        let inputImage: CIImage
-        if let rawCIImage {
-            inputImage = rawCIImage
-        } else if let sourceImage, let ci = CIImage(image: sourceImage) {
-            inputImage = ci
-        } else {
+        
+        guard let ci = CIImage(image: sourceImage) else {
             editedImage = nil
             return
         }
-
-        let rendered: UIImage? = autoreleasepool {
-            let output = applyFilterChain(to: inputImage)
-            guard let cgImage = context.createCGImage(output, from: output.extent) else {
-                return sourceImage
+        let inputImage = ci
+        
+        // Capture current state values
+        let preset = selectedPreset
+        let exp = exposure
+        let con = contrast
+        let shad = shadows
+        let high = highlights
+        let cropOpt = cropOption
+        let cropOff = cropOffset
+        
+        editTask = Task {
+            // Debounce to avoid stuttering during slider drag
+            try? await Task.sleep(nanoseconds: 15_000_000) // 15ms
+            if Task.isCancelled { return }
+            
+            
+            // Perform rendering on a detached task to avoid blocking main thread
+            // We can't use `Task.detached` easily inside this `Task` without more dancing,
+            // but simply being in a Task allows non-blocking of the UI event loop if we yield.
+            // However, CIContext.createCGImage IS synchronous and CPU intensive.
+            // So we really want `Task.detached`.
+            
+            let result: UIImage? = await Task.detached(priority: .userInitiated) {
+                if Task.isCancelled { return nil }
+                
+                let output = await self.applyFilterChain(
+                    to: inputImage,
+                    preset: preset,
+                    exposure: exp,
+                    contrast: con,
+                    shadows: shad,
+                    highlights: high,
+                    cropOption: cropOpt,
+                    cropOffset: cropOff
+                )
+                
+                if Task.isCancelled { return nil }
+                
+                let cgImage = self.context.createCGImage(output, from: output.extent)
+                if let cgImage {
+                    return UIImage(cgImage: cgImage)
+                }
+                return nil
+            }.value
+            
+            if !Task.isCancelled, let result {
+                self.editedImage = result
             }
-            return UIImage(cgImage: cgImage)
         }
-
-        editedImage = rendered ?? sourceImage
     }
 
-    /// Applies all current edits (preset, adjustments, crop) to a CIImage.
-    private func applyFilterChain(to inputImage: CIImage) -> CIImage {
-        var output = applyMoviePreset(selectedPreset, to: inputImage)
+    private func applyFilterChain(
+        to inputImage: CIImage,
+        preset: MoviePreset,
+        exposure: Double,
+        contrast: Double,
+        shadows: Double,
+        highlights: Double,
+        cropOption: CropOption,
+        cropOffset: CGSize
+    ) -> CIImage {
+        var output = applyMoviePreset(preset, to: inputImage)
 
         let exposureFilter = CIFilter.exposureAdjust()
         exposureFilter.inputImage = output
@@ -317,44 +349,49 @@ final class EditorViewModel: ObservableObject {
             return temp.outputImage ?? output
 
         case .sinCity:
-            // Sin City: near-monochrome, extreme contrast, noir
-            // Luminance-weighted desaturation with boosted red channel (brighter skin tones)
-            let matrix = CIFilter.colorMatrix()
-            matrix.inputImage = image
-            matrix.rVector = CIVector(x: 0.35, y: 0.55, z: 0.10, w: 0.0)
-            matrix.gVector = CIVector(x: 0.35, y: 0.55, z: 0.10, w: 0.0)
-            matrix.bVector = CIVector(x: 0.35, y: 0.55, z: 0.10, w: 0.0)
-            matrix.aVector = CIVector(x: 0.0, y: 0.0, z: 0.0, w: 1.0)
-            matrix.biasVector = CIVector(x: 0.0, y: 0.0, z: 0.0, w: 0.0)
-            var output = matrix.outputImage ?? image
+            // Sin City: B&W with red colour spill — only saturated reds stay red, all else monochrome
 
-            // High contrast, full desaturation (already B&W from matrix), slight darkening
-            let controls = CIFilter.colorControls()
-            controls.inputImage = output
-            controls.saturation = 0.0
-            controls.contrast = 1.45
-            controls.brightness = 0.02
-            output = controls.outputImage ?? output
+            // --- B&W pipeline ---
+            let bwMatrix = CIFilter.colorMatrix()
+            bwMatrix.inputImage = image
+            bwMatrix.rVector = CIVector(x: 0.299, y: 0.587, z: 0.114, w: 0.0)
+            bwMatrix.gVector = CIVector(x: 0.299, y: 0.587, z: 0.114, w: 0.0)
+            bwMatrix.bVector = CIVector(x: 0.299, y: 0.587, z: 0.114, w: 0.0)
+            bwMatrix.aVector = CIVector(x: 0.0,   y: 0.0,   z: 0.0,   w: 1.0)
+            var bw = bwMatrix.outputImage ?? image
 
-            // Crush shadows, push highlights for stencil noir feel
+            let bwControls = CIFilter.colorControls()
+            bwControls.inputImage = bw
+            bwControls.saturation = 0.0
+            bwControls.contrast = 1.5
+            bwControls.brightness = 0.0
+            bw = bwControls.outputImage ?? bw
+
             let shadowHighlight = CIFilter.highlightShadowAdjust()
-            shadowHighlight.inputImage = output
-            shadowHighlight.shadowAmount = -0.5
-            shadowHighlight.highlightAmount = 0.7
-            output = shadowHighlight.outputImage ?? output
+            shadowHighlight.inputImage = bw
+            shadowHighlight.shadowAmount = -0.55
+            shadowHighlight.highlightAmount = 0.65
+            bw = shadowHighlight.outputImage ?? bw
 
-            // Slight exposure push to open up highlights
-            let exposureFilter = CIFilter.exposureAdjust()
-            exposureFilter.inputImage = output
-            exposureFilter.ev = 0.3
-            output = exposureFilter.outputImage ?? output
+            // --- Red mask via 3D colour cube (HSB-based) ---
+            // Build a 64³ cube LUT: pixels whose hue is in the red range AND
+            // have enough saturation map to white (1,1,1); everything else to black (0,0,0).
+            let redMask = Self.sinCityRedMask(image: image)
 
-            // Slightly cool temperature for noir feel
-            let temp = CIFilter.temperatureAndTint()
-            temp.inputImage = output
-            temp.neutral = CIVector(x: 6500, y: 0)
-            temp.targetNeutral = CIVector(x: 6200, y: 0)
-            return temp.outputImage ?? output
+            // Boost saturation on original so reds pop vividly
+            let boostControls = CIFilter.colorControls()
+            boostControls.inputImage = image
+            boostControls.saturation = 2.2
+            boostControls.contrast = 1.1
+            boostControls.brightness = 0.0
+            let boostedColor = boostControls.outputImage ?? image
+
+            // Blend: mask=white → boosted colour (red areas), mask=black → B&W
+            let blend = CIFilter(name: "CIBlendWithMask")!
+            blend.setValue(boostedColor, forKey: kCIInputImageKey)
+            blend.setValue(bw, forKey: kCIInputBackgroundImageKey)
+            blend.setValue(redMask, forKey: kCIInputMaskImageKey)
+            return blend.outputImage ?? bw
 
         case .theBatman:
             // The Batman 2022: dark, desaturated, bleach bypass, teal shadows, crushed blacks
@@ -431,6 +468,68 @@ final class EditorViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Sin City red mask
+
+    /// 64³ colour cube data for the red-hue mask used by Sin City preset.
+    private static var sinCityColorCubeData: Data = {
+        let size = 64
+        let stride = size * size * size * 4  // RGBA Float32
+        var data = [Float32](repeating: 0, count: size * size * size * 4)
+        // CIColorCube iterates: b outermost, g middle, r innermost
+        for bi in 0..<size {
+            for gi in 0..<size {
+                for ri in 0..<size {
+                    let r = Float(ri) / Float(size - 1)
+                    let g = Float(gi) / Float(size - 1)
+                    let b = Float(bi) / Float(size - 1)
+
+                    // Convert RGB → HSB
+                    let maxC = Swift.max(r, g, b)
+                    let minC = Swift.min(r, g, b)
+                    let delta = maxC - minC
+
+                    var h: Float = 0
+                    if delta > 0.001 {
+                        if maxC == r {
+                            h = (g - b) / delta
+                            if h < 0 { h += 6 }
+                        } else if maxC == g {
+                            h = 2 + (b - r) / delta
+                        } else {
+                            h = 4 + (r - g) / delta
+                        }
+                        h /= 6  // normalise to 0…1
+                    }
+
+                    let s = maxC > 0.001 ? delta / maxC : 0
+                    let v = maxC
+
+                    // Ultra-tight red hue: ≈ ±8° around 0°/360° — only pure crimson/blood red
+                    let isRedHue = h <= 0.022 || h >= 0.978
+                    // Very high saturation: must be vivid saturated red (blood, lipstick)
+                    let isRed = isRedHue && s > 0.80 && v > 0.20
+
+                    let mask: Float = isRed ? 1.0 : 0.0
+                    let idx = (bi * size * size + gi * size + ri) * 4
+                    data[idx + 0] = mask
+                    data[idx + 1] = mask
+                    data[idx + 2] = mask
+                    data[idx + 3] = 1.0
+                }
+            }
+        }
+        return Data(bytes: data, count: data.count * MemoryLayout<Float32>.size)
+    }()
+
+    private static func sinCityRedMask(image: CIImage) -> CIImage {
+        let size = 64
+        let cube = CIFilter(name: "CIColorCube")!
+        cube.setValue(size, forKey: "inputCubeDimension")
+        cube.setValue(sinCityColorCubeData, forKey: "inputCubeData")
+        cube.setValue(image, forKey: kCIInputImageKey)
+        return cube.outputImage ?? image
+    }
+
     /// Crops to `targetRatio`. Auto-swaps orientation to match image unless `forceHorizontal`.
     /// `offset` is normalized –1…+1 panning within the available slack.
     private func offsetCrop(image: CIImage, targetRatio: CGFloat, forceHorizontal: Bool, offset: CGSize) -> CIImage {
@@ -468,32 +567,4 @@ final class EditorViewModel: ObservableObject {
     }
 }
 
-private extension UIImage {
-    func normalizedUpOrientation() -> UIImage {
-        guard imageOrientation != .up else { return self }
-        let format = UIGraphicsImageRendererFormat.default()
-        format.scale = 1.0
-        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
-            draw(in: CGRect(origin: .zero, size: size))
-        }
-    }
 
-    func downscaledForEditing(maxDimension: CGFloat) -> UIImage {
-        let maxSide = max(size.width, size.height)
-        guard maxSide > maxDimension else { return self }
-
-        let scaleFactor = maxDimension / maxSide
-        let targetSize = CGSize(
-            width: size.width * scaleFactor,
-            height: size.height * scaleFactor
-        )
-
-        let format = UIGraphicsImageRendererFormat.default()
-        format.scale = 1.0
-        format.opaque = false
-
-        return UIGraphicsImageRenderer(size: targetSize, format: format).image { _ in
-            draw(in: CGRect(origin: .zero, size: targetSize))
-        }
-    }
-}
