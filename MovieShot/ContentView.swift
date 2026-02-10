@@ -7,6 +7,9 @@ struct ContentView: View {
     @StateObject private var viewModel = EditorViewModel()
     @State private var loadingSpin = false
     @State private var cropDragStart: CGSize = .zero
+    @State private var rotationAngle: Angle = .zero
+    @State private var isPhysicalLandscape: Bool = false
+    @State private var showSettings = false
 
     private let cinemaBlack = Color(red: 0.05, green: 0.06, blue: 0.08)
     private let cinemaSlate = Color(red: 0.11, green: 0.13, blue: 0.17)
@@ -14,36 +17,33 @@ struct ContentView: View {
     private let cinemaTeal = Color(red: 0.22, green: 0.74, blue: 0.79)
 
     var body: some View {
-        NavigationStack {
-            GeometryReader { proxy in
-                let isLandscape = proxy.size.width > proxy.size.height
+        GeometryReader { proxy in
+            let isLandscape = resolvedIsLandscape(for: proxy.size)
 
-                ZStack {
-                    LinearGradient(
-                        colors: [cinemaBlack, cinemaSlate],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                    .ignoresSafeArea()
+            ZStack {
+                LinearGradient(
+                    colors: [cinemaBlack, cinemaSlate],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .ignoresSafeArea()
 
-                    screenLayout(in: proxy, isLandscape: isLandscape)
+                screenLayout(in: proxy, isLandscape: isLandscape)
 
-                    if viewModel.showPresetLoading {
-                        loadingOverlay
-                            .transition(.opacity)
-                            .onAppear {
-                                loadingSpin = false
-                                withAnimation(.linear(duration: 1.1).repeatForever(autoreverses: false)) {
-                                    loadingSpin = true
-                                }
+                if viewModel.showPresetLoading {
+                    loadingOverlay
+                        .transition(.opacity)
+                        .onAppear {
+                            loadingSpin = false
+                            withAnimation(.linear(duration: 1.1).repeatForever(autoreverses: false)) {
+                                loadingSpin = true
                             }
-                            .onDisappear {
-                                loadingSpin = false
-                            }
-                    }
+                        }
+                        .onDisappear {
+                            loadingSpin = false
+                        }
                 }
             }
-            .navigationBarHidden(true)
         }
         .tint(cinemaAmber)
         .onAppear {
@@ -66,62 +66,94 @@ struct ContentView: View {
                 ShareSheet(items: [image])
             }
         }
+        .sheet(isPresented: $showSettings) {
+             SettingsSheet(cameraService: viewModel.cameraService)
+                 .presentationDetents([.fraction(0.4)])
+                 .presentationDragIndicator(.visible)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
+            let orientation = UIDevice.current.orientation
+            withAnimation {
+                switch orientation {
+                case .landscapeLeft:
+                    rotationAngle = .degrees(90)
+                    isPhysicalLandscape = true
+                case .landscapeRight:
+                    rotationAngle = .degrees(-90)
+                    isPhysicalLandscape = true
+                case .portrait:
+                    rotationAngle = .degrees(0)
+                    isPhysicalLandscape = false
+                default:
+                    break
+                }
+            }
+        }
     }
 
+    @ViewBuilder
     private func screenLayout(in proxy: GeometryProxy, isLandscape: Bool) -> some View {
-        let previewHeight = previewHeight(for: proxy.size, isLandscape: isLandscape)
+        // Always use portrait layout structure since app is locked to portrait.
+        // We adjust visibility and rotation based on physical device orientation.
+        let previewHeight = previewHeight(for: proxy.size, isPhysicalLandscape: isPhysicalLandscape)
 
-        return VStack(spacing: isLandscape ? 6 : 10) {
-            if isLandscape {
-                compactHeader
-            } else {
+        VStack(spacing: 10) {
+            // Header with local padding
+            VStack(spacing: 10) {
                 titleBlock
                 stepHeader
             }
+            .padding(.horizontal, 14)
 
-            previewArea(isLandscape: isLandscape)
+            // Preview Area - Minimal padding for "full width" look but keeping border
+            previewArea(isLandscape: false) 
                 .frame(height: previewHeight)
+                .padding(.horizontal, 4) 
+            
+            Spacer(minLength: 0) // Push controls to bottom
 
             if !viewModel.showPresetLoading {
-                stepControls
-                if viewModel.step != .source {
-                    stepActions
+                VStack(spacing: 10) {
+                    stepControls
+                    if viewModel.step != .source {
+                        stepActions
+                    }
                 }
+                .padding(.horizontal, 14)
             }
 
             if let statusMessage = viewModel.statusMessage {
                 statusBanner(statusMessage)
+                    .padding(.horizontal, 14)
             }
-
-            Spacer(minLength: 0)
+            
+            // Bottom padding spacer already handled by padding(.vertical)
         }
-        .padding(.horizontal, isLandscape ? 10 : 14)
-        .padding(.vertical, isLandscape ? 8 : 10)
+        .padding(.vertical, 10)
         .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
     }
 
-    private func previewHeight(for size: CGSize, isLandscape: Bool) -> CGFloat {
-        if isLandscape {
-            let ratio: CGFloat
-            switch viewModel.step {
-            case .source:
-                ratio = 0.50
-            case .preset:
-                ratio = 0.40
-            case .adjust:
-                ratio = 0.30
-            case .crop:
-                ratio = 0.36
-            case .final:
-                ratio = 0.36
-            }
-            return max(size.height * ratio, 140)
+    private func previewHeight(for size: CGSize, isPhysicalLandscape: Bool) -> CGFloat? {
+        // In landscape source mode, let the preview expand to fill available space
+        if isPhysicalLandscape && viewModel.step == .source {
+            // Return 4:3 ratio based on width (same as portrait)
+            return size.width * (4.0 / 3.0)
         }
 
-        // Portrait: camera source gets full 3:4 preview
+        // Portrait: camera source and Editor steps get full 3:4 preview potential
+        // Maximum height needed for a 3:4 image is width * (4/3)
+        // We use a slightly smaller multiplier if needed to fit controls, but user requested "bigger".
+        // Let's try to give it the full 4:3 aspect ratio space based on width.
+        // let targetHeight = size.width * (4.0 / 3.0)
+        
+        // Ensure we don't overflow the screen height preventing controls from showing.
+        // Controls take up significant vertical space. Let's reserve ~40% for UI.
+        // return min(targetHeight, size.height * 0.60) 
+        
+        // REVERTED to per-step logic to ensure fit
         if viewModel.step == .source {
-            let targetHeight = size.width * (4.0 / 3.0)
-            return min(targetHeight, size.height * 0.68)
+             let targetHeight = size.width * (4.0 / 3.0)
+             return min(targetHeight, size.height * 0.68)
         }
 
         let ratio: CGFloat
@@ -131,13 +163,33 @@ struct ContentView: View {
         case .preset:
             ratio = 0.44
         case .adjust:
-            ratio = 0.36
+            ratio = 0.36 // Smaller for adjust controls
         case .crop:
             ratio = 0.44
         case .final:
             ratio = 0.42
         }
-        return min(max(size.height * ratio, 200), 480)
+        return min(max(size.height * ratio, 200), 480) 
+    }
+
+    private func resolvedIsLandscape(for size: CGSize) -> Bool {
+        if let orientation = currentInterfaceOrientation() {
+            return orientation.isLandscape
+        }
+        return size.width > size.height
+    }
+
+    private func currentInterfaceOrientation() -> UIInterfaceOrientation? {
+        let scenes = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+        guard let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first else {
+            return nil
+        }
+        if #available(iOS 26.0, *) {
+            return scene.effectiveGeometry.interfaceOrientation
+        } else {
+            return scene.interfaceOrientation
+        }
     }
 
     private func statusBanner(_ statusMessage: String) -> some View {
@@ -156,9 +208,13 @@ struct ContentView: View {
                     .font(.headline.weight(.bold))
                     .foregroundStyle(.white)
                 Spacer()
-                Image(systemName: "film.stack.fill")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(cinemaAmber)
+                Button {
+                    showSettings = true
+                } label: {
+                    Image(systemName: "gearshape.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(cinemaAmber)
+                }
             }
 
             Text(viewModel.step.title)
@@ -188,9 +244,13 @@ struct ContentView: View {
                     .foregroundStyle(.white.opacity(0.75))
             }
             Spacer()
-            Image(systemName: "film.stack.fill")
-                .font(.system(size: 24, weight: .semibold))
-                .foregroundStyle(cinemaAmber)
+            Button {
+                showSettings = true
+            } label: {
+                Image(systemName: "gearshape.fill")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(cinemaAmber)
+            }
         }
     }
 
@@ -260,47 +320,31 @@ struct ContentView: View {
             }
     }
 
-    private func sourceCameraView(isLandscape: Bool) -> some View {
-        ZStack {
+    /// Camera preview with flip button overlay, controls in a separate bar outside.
+    private var cameraPreviewWithFlip: some View {
+        ZStack(alignment: .topLeading) {
             CameraPreviewView(
                 session: viewModel.cameraService.session,
-                cameraService: viewModel.cameraService,
                 deviceChangeCount: viewModel.cameraService.deviceChangeCount
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            VStack {
-                HStack {
-                    Button {
-                        viewModel.cameraService.togglePosition()
-                    } label: {
-                        Label("Flip", systemImage: "arrow.triangle.2.circlepath.camera")
-                            .font(.subheadline.weight(.semibold))
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.white)
-
-                    Spacer()
-                }
-                .padding(.horizontal, 12)
-                .padding(.top, 10)
-
-                Spacer()
-
-                if isLandscape {
-                    HStack {
-                        Spacer()
-                        landscapeCameraControls
-                    }
-                    .padding(.trailing, 14)
-                    .padding(.bottom, 14)
-                } else {
-                    portraitCameraControls
-                        .padding(.horizontal, 14)
-                        .padding(.bottom, 14)
-                }
+            Button {
+                viewModel.cameraService.togglePosition()
+            } label: {
+                Label("Flip", systemImage: "arrow.triangle.2.circlepath.camera")
+                    .font(.subheadline.weight(.semibold))
             }
+            .buttonStyle(.bordered)
+            .tint(.white)
+            .padding(10)
         }
+        .clipped()
+    }
+
+    @ViewBuilder
+    private func sourceCameraView(isLandscape: Bool) -> some View {
+        cameraPreviewWithFlip
     }
 
     @ViewBuilder
@@ -349,30 +393,19 @@ struct ContentView: View {
                     .foregroundStyle(.white.opacity(0.78))
                     .padding(12)
                     .background(panelBackground)
+            } else {
+                // Active camera controls (Source step, no image yet)
+                HStack(alignment: .center, spacing: 28) {
+                    lensControl
+                    shutterControl
+                    galleryControl
+                }
+                .padding(20)
+                // No background here, just the controls floating or in the main layout flow
             }
         }
     }
 
-    private var portraitCameraControls: some View {
-        HStack(alignment: .center, spacing: 28) {
-            lensControl
-            shutterControl
-            galleryControl
-        }
-    }
-
-    private var landscapeCameraControls: some View {
-        VStack(alignment: .center, spacing: 18) {
-            lensControl
-            shutterControl
-            galleryControl
-        }
-        .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(.black.opacity(0.38))
-        )
-    }
 
     private var lensControl: some View {
         Menu {
@@ -386,6 +419,8 @@ struct ContentView: View {
                 icon: "camera.metering.center.weighted",
                 title: viewModel.cameraService.selectedLens?.name ?? "Lens"
             )
+            .rotationEffect(rotationAngle)
+            .animation(.easeInOut, value: rotationAngle)
         }
         .disabled(viewModel.cameraService.availableLenses.isEmpty)
     }
@@ -393,6 +428,8 @@ struct ContentView: View {
     private var galleryControl: some View {
         PhotosPicker(selection: $viewModel.pickerItem, matching: .images) {
             cameraToolButton(icon: "photo.stack.fill", title: "Gallery")
+                .rotationEffect(rotationAngle)
+                .animation(.easeInOut, value: rotationAngle)
         }
     }
 
@@ -411,6 +448,8 @@ struct ContentView: View {
                     .frame(width: 62, height: 62)
             }
             .shadow(color: cinemaAmber.opacity(0.45), radius: 10, x: 0, y: 4)
+            .rotationEffect(rotationAngle)
+            .animation(.easeInOut, value: rotationAngle)
         }
         .buttonStyle(.plain)
         .disabled(viewModel.cameraService.authorizationStatus != .authorized)
@@ -645,6 +684,54 @@ struct ContentView: View {
 private extension CGFloat {
     func clamped(to range: ClosedRange<CGFloat>) -> CGFloat {
         Swift.min(Swift.max(self, range.lowerBound), range.upperBound)
+    }
+}
+
+struct SettingsSheet: View {
+    @ObservedObject var cameraService: CameraService
+    @Environment(\.dismiss) var dismiss
+    
+    // Theme colors
+    private let cinemaBlack = Color(red: 0.05, green: 0.06, blue: 0.08)
+    private let cinemaSlate = Color(red: 0.11, green: 0.13, blue: 0.17)
+    private let cinemaAmber = Color(red: 0.96, green: 0.69, blue: 0.27)
+    
+    var body: some View {
+        ZStack {
+            cinemaSlate.ignoresSafeArea()
+            
+            VStack(spacing: 24) {
+                Text("Settings")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .padding(.top, 20)
+                
+                VStack(alignment: .leading, spacing: 16) {
+                    Toggle("Enable RAW Capture", isOn: $cameraService.isRawEnabled)
+                        .tint(cinemaAmber)
+                        .foregroundStyle(.white)
+                        .font(.body.weight(.medium))
+                    
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Disable RAW in dark environments. HEIC allows for better low-light processing.")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.7))
+                        
+                        Text("Note: HEIC photos have less data for editing and presets. Keep RAW enabled for best editing results when lighting is good.")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.5))
+                    }
+                }
+                .padding(20)
+                .background(
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color.black.opacity(0.2))
+                )
+                .padding(.horizontal)
+                
+                Spacer()
+            }
+        }
     }
 }
 

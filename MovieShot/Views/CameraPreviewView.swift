@@ -4,7 +4,6 @@ import UIKit
 
 struct CameraPreviewView: UIViewRepresentable {
     let session: AVCaptureSession
-    let cameraService: CameraService
     /// Observed so SwiftUI calls updateUIView when the camera device changes.
     let deviceChangeCount: Int
 
@@ -12,15 +11,14 @@ struct CameraPreviewView: UIViewRepresentable {
         let view = PreviewView()
         view.videoPreviewLayer.videoGravity = .resizeAspectFill
         view.videoPreviewLayer.session = session
-        view.cameraService = cameraService
+        view.updateDeviceChangeCount(deviceChangeCount)
         return view
     }
 
     func updateUIView(_ uiView: PreviewView, context: Context) {
         uiView.videoPreviewLayer.session = session
-        uiView.cameraService = cameraService
-        // Force re-evaluation when the device changes
-        uiView.resetTrackedDevice()
+        uiView.updateDeviceChangeCount(deviceChangeCount)
+        uiView.setupRotationIfReady()
     }
 }
 
@@ -29,10 +27,11 @@ final class PreviewView: UIView {
     private var previewRotationObservation: NSKeyValueObservation?
     private var sessionObservation: NSObjectProtocol?
     private var trackedDeviceID: String?
+    private var lastDeviceChangeCount = -1
 
-    weak var cameraService: CameraService?
-
-    func resetTrackedDevice() {
+    func updateDeviceChangeCount(_ value: Int) {
+        guard value != lastDeviceChangeCount else { return }
+        lastDeviceChangeCount = value
         trackedDeviceID = nil
         setupRotationIfReady()
     }
@@ -45,11 +44,16 @@ final class PreviewView: UIView {
         layer as! AVCaptureVideoPreviewLayer
     }
 
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        setupRotationIfReady()
+    }
+
     override func didMoveToWindow() {
         super.didMoveToWindow()
         if window != nil {
             setupRotationIfReady()
-            // Also listen for session start so we can configure rotation
+            // Also listen for session start so we can configure orientation
             // when the connection becomes available after session starts running.
             if sessionObservation == nil {
                 sessionObservation = NotificationCenter.default.addObserver(
@@ -69,15 +73,13 @@ final class PreviewView: UIView {
         }
     }
 
-    private func setupRotationIfReady() {
-        guard let service = cameraService else { return }
-        guard let device = currentVideoDevice(in: service.session) else { return }
+    func setupRotationIfReady() {
+        guard let session = videoPreviewLayer.session else { return }
+        guard let device = currentVideoDevice(in: session) else { return }
         guard videoPreviewLayer.connection != nil else { return }
+        guard trackedDeviceID != device.uniqueID || rotationCoordinator == nil else { return }
 
-        // Only reconfigure if the device changed
-        guard trackedDeviceID != device.uniqueID else { return }
-
-        teardownRotation()
+        teardownRotation(clearDeviceID: false)
         trackedDeviceID = device.uniqueID
 
         let coordinator = AVCaptureDevice.RotationCoordinator(
@@ -86,10 +88,8 @@ final class PreviewView: UIView {
         )
         rotationCoordinator = coordinator
 
-        // Apply initial angle
         applyRotation(coordinator.videoRotationAngleForHorizonLevelPreview)
 
-        // Observe continuous changes
         previewRotationObservation = coordinator.observe(
             \.videoRotationAngleForHorizonLevelPreview,
             options: [.new]
@@ -98,13 +98,6 @@ final class PreviewView: UIView {
                 self?.applyRotation(coord.videoRotationAngleForHorizonLevelPreview)
             }
         }
-    }
-
-    private func teardownRotation() {
-        previewRotationObservation?.invalidate()
-        previewRotationObservation = nil
-        rotationCoordinator = nil
-        trackedDeviceID = nil
     }
 
     private func applyRotation(_ angle: CGFloat) {
@@ -120,7 +113,17 @@ final class PreviewView: UIView {
             .device
     }
 
+    private func teardownRotation(clearDeviceID: Bool = true) {
+        previewRotationObservation?.invalidate()
+        previewRotationObservation = nil
+        rotationCoordinator = nil
+        if clearDeviceID {
+            trackedDeviceID = nil
+        }
+    }
+
     deinit {
+        teardownRotation()
         if let obs = sessionObservation {
             NotificationCenter.default.removeObserver(obs)
         }

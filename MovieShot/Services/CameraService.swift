@@ -121,13 +121,18 @@ final class CameraService: NSObject, ObservableObject {
         configureInput(for: lens)
     }
 
+    @Published var isRawEnabled = true
+    
+    // ... (existing properties)
+
     func capturePhoto() {
         guard isSessionRunning else { return }
 
         let settings: AVCapturePhotoSettings
 
         // Always capture RAW + HEVC when RAW is available (better data for editing)
-        if let rawType = photoOutput.availableRawPhotoPixelFormatTypes.first {
+        // BUT only if the user has enabled RAW capture.
+        if isRawEnabled, let rawType = photoOutput.availableRawPhotoPixelFormatTypes.first {
             settings = AVCapturePhotoSettings(
                 rawPixelFormatType: rawType,
                 processedFormat: [AVVideoCodecKey: AVVideoCodecType.hevc]
@@ -145,10 +150,13 @@ final class CameraService: NSObject, ObservableObject {
         }
 
         settings.maxPhotoDimensions = photoOutput.maxPhotoDimensions
+        
         // photoQualityPrioritization is unsupported when capturing RAW
-        if photoOutput.availableRawPhotoPixelFormatTypes.isEmpty {
+        if settings.rawPhotoPixelFormatType == 0 {
+            // When not capturing RAW, we can use the camera's processing smarts (Night Mode etc)
             settings.photoQualityPrioritization = .balanced
         }
+        
         photoOutput.capturePhoto(with: settings, delegate: self)
     }
 
