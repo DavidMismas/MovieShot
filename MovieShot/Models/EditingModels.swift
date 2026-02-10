@@ -61,11 +61,11 @@ enum MoviePreset: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .matrix: return "Matrix"
-        case .bladeRunner2049: return "Blade Runner 2049"
-        case .sinCity: return "Sin City"
-        case .theBatman: return "The Batman"
-        case .strangerThings: return "Stranger Things"
+        case .matrix: return "MathX"
+        case .bladeRunner2049: return "Runner 2094"
+        case .sinCity: return "Hell City"
+        case .theBatman: return "Darkman"
+        case .strangerThings: return "Weirder Things"
         }
     }
 

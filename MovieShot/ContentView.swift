@@ -236,10 +236,10 @@ struct ContentView: View {
     private var titleBlock: some View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("MovieShot")
+                Text("Movira")
                     .font(.system(size: 30, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
-                Text("cinematic camera + grading")
+                Text("cinematic photo camera grading")
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.75))
             }

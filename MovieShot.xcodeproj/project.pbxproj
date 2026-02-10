@@ -256,6 +256,8 @@
 				DEVELOPMENT_TEAM = AX2Z5LF5SG;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Movira;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.photography";
 				INFOPLIST_KEY_NSCameraUsageDescription = "MovieShot needs camera access to capture photos.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "MovieShot saves edited photos to your gallery.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "MovieShot lets you pick photos from your gallery.";
@@ -292,6 +294,8 @@
 				DEVELOPMENT_TEAM = AX2Z5LF5SG;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Movira;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.photography";
 				INFOPLIST_KEY_NSCameraUsageDescription = "MovieShot needs camera access to capture photos.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "MovieShot saves edited photos to your gallery.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "MovieShot lets you pick photos from your gallery.";
