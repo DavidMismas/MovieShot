@@ -53,6 +53,9 @@ enum CropOption: String, CaseIterable, Identifiable {
 enum MoviePreset: String, CaseIterable, Identifiable {
     case matrix
     case bladeRunner2049
+    case sinCity
+    case theBatman
+    case strangerThings
 
     var id: String { rawValue }
 
@@ -60,6 +63,9 @@ enum MoviePreset: String, CaseIterable, Identifiable {
         switch self {
         case .matrix: return "Matrix"
         case .bladeRunner2049: return "Blade Runner 2049"
+        case .sinCity: return "Sin City"
+        case .theBatman: return "The Batman"
+        case .strangerThings: return "Stranger Things"
         }
     }
 
@@ -67,6 +73,9 @@ enum MoviePreset: String, CaseIterable, Identifiable {
         switch self {
         case .matrix: return "Green cast, cooler mids, high contrast"
         case .bladeRunner2049: return "Warm highlights, teal shadows, bold contrast"
+        case .sinCity: return "High contrast B&W, crushed shadows, noir"
+        case .theBatman: return "Dark desaturated, teal shadows, crushed blacks"
+        case .strangerThings: return "Warm amber tones, muted vintage, nostalgic"
         }
     }
 }

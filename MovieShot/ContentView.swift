@@ -281,20 +281,6 @@ struct ContentView: View {
                     .tint(.white)
 
                     Spacer()
-
-                    Button {
-                        guard viewModel.cameraService.isRAWAvailable else { return }
-                        viewModel.cameraService.isRAWEnabled.toggle()
-                    } label: {
-                        Label(
-                            viewModel.cameraService.isRAWEnabled ? "RAW On" : "RAW",
-                            systemImage: "camera.aperture"
-                        )
-                        .font(.subheadline.weight(.semibold))
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(viewModel.cameraService.isRAWEnabled ? cinemaAmber : .white)
-                    .disabled(!viewModel.cameraService.isRAWAvailable)
                 }
                 .padding(.horizontal, 12)
                 .padding(.top, 10)
@@ -335,7 +321,28 @@ struct ContentView: View {
 
     private var sourceControls: some View {
         Group {
-            if viewModel.cameraService.authorizationStatus == .denied ||
+            if viewModel.sourceImage != nil {
+                // Already have a captured/picked image — offer retake or continue
+                HStack {
+                    Button {
+                        viewModel.restart()
+                    } label: {
+                        Label("Retake", systemImage: "camera.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button {
+                        viewModel.continueStep()
+                    } label: {
+                        Label("Continue Editing", systemImage: "arrow.right")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .padding(12)
+                .background(panelBackground)
+            } else if viewModel.cameraService.authorizationStatus == .denied ||
                 viewModel.cameraService.authorizationStatus == .restricted {
                 Text("Camera access is denied. Use gallery or enable camera in Settings.")
                     .font(.caption)
@@ -428,44 +435,47 @@ struct ContentView: View {
     }
 
     private var presetControls: some View {
-        HStack(spacing: 10) {
-            ForEach(MoviePreset.allCases) { preset in
-                Button {
-                    viewModel.selectedPreset = preset
-                } label: {
-                    VStack(spacing: 8) {
-                        Image(systemName: presetIcon(for: preset))
-                            .font(.title2)
-                            .foregroundStyle(preset == viewModel.selectedPreset ? cinemaAmber : .white.opacity(0.6))
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(MoviePreset.allCases) { preset in
+                    Button {
+                        viewModel.selectedPreset = preset
+                    } label: {
+                        VStack(spacing: 8) {
+                            Image(systemName: presetIcon(for: preset))
+                                .font(.title2)
+                                .foregroundStyle(preset == viewModel.selectedPreset ? cinemaAmber : .white.opacity(0.6))
 
-                        Text(preset.title)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.white)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
+                            Text(preset.title)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
 
-                        Text(preset.subtitle)
-                            .font(.caption2)
-                            .foregroundStyle(.white.opacity(0.6))
-                            .lineLimit(2)
-                            .multilineTextAlignment(.center)
+                            Text(preset.subtitle)
+                                .font(.caption2)
+                                .foregroundStyle(.white.opacity(0.6))
+                                .lineLimit(2)
+                                .multilineTextAlignment(.center)
+                        }
+                        .frame(width: 120)
+                        .padding(.vertical, 12)
+                        .padding(.horizontal, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 14)
+                                .fill(preset == viewModel.selectedPreset ? .white.opacity(0.12) : .white.opacity(0.05))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14)
+                                .stroke(preset == viewModel.selectedPreset ? cinemaTeal : .clear, lineWidth: 1.5)
+                        )
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .padding(.horizontal, 8)
-                    .background(
-                        RoundedRectangle(cornerRadius: 14)
-                            .fill(preset == viewModel.selectedPreset ? .white.opacity(0.12) : .white.opacity(0.05))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14)
-                            .stroke(preset == viewModel.selectedPreset ? cinemaTeal : .clear, lineWidth: 1.5)
-                    )
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
+            .padding(.horizontal, 12)
         }
-        .padding(12)
+        .padding(.vertical, 12)
         .background(panelBackground)
     }
 
@@ -475,6 +485,12 @@ struct ContentView: View {
             return "cpu"
         case .bladeRunner2049:
             return "sun.haze.fill"
+        case .sinCity:
+            return "circle.lefthalf.filled"
+        case .theBatman:
+            return "moon.fill"
+        case .strangerThings:
+            return "sparkles.tv.fill"
         }
     }
 
@@ -518,6 +534,12 @@ struct ContentView: View {
 
     private var exportControls: some View {
         VStack(spacing: 10) {
+            if viewModel.isRAWSource {
+                Text("Edited from RAW source")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(cinemaAmber)
+            }
+
             Button {
                 viewModel.showShareSheet = true
             } label: {
@@ -535,12 +557,6 @@ struct ContentView: View {
             }
             .buttonStyle(.bordered)
             .disabled(viewModel.editedImage == nil)
-
-            if viewModel.rawData != nil {
-                Text("RAW (.dng) was captured along with this photo.")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.76))
-            }
         }
         .padding(12)
         .background(panelBackground)

@@ -16,6 +16,12 @@ final class EditorViewModel: ObservableObject {
         didSet { applyEdits() }
     }
     @Published var editedImage: UIImage?
+    /// RAW DNG data from camera — used as editing source for better quality.
+    private var rawCIImage: CIImage?
+    /// Full-res RAW CIImage for export.
+    private var fullResRawCIImage: CIImage?
+    /// Whether the current source was captured in RAW.
+    @Published private(set) var isRAWSource = false
     @Published var selectedPreset: MoviePreset = .matrix {
         didSet { applyEdits() }
     }
@@ -44,7 +50,6 @@ final class EditorViewModel: ObservableObject {
     @Published var pickerItem: PhotosPickerItem? {
         didSet { loadFromPicker() }
     }
-    @Published var rawData: Data?
     @Published var statusMessage: String?
     @Published var showShareSheet = false
     @Published var showPresetLoading = false
@@ -77,7 +82,34 @@ final class EditorViewModel: ObservableObject {
         // Cap full-res at 12MP (4032px longest edge) for export
         fullResSourceImage = normalized.downscaledForEditing(maxDimension: 4032)
         sourceImage = normalized.downscaledForEditing(maxDimension: 2500)
-        self.rawData = rawData
+
+        // If RAW DNG data is available, create CIImages from it for editing
+        if let rawData,
+           let rawFilter = CIRAWFilter(imageData: rawData, identifierHint: "com.adobe.raw-image") {
+            rawFilter.extendedDynamicRangeAmount = 0.0
+            rawFilter.baselineExposure = 0.0
+            if let fullRaw = rawFilter.outputImage {
+                fullResRawCIImage = fullRaw
+                // Downscale for preview by clamping longest edge
+                let maxSide = Swift.max(fullRaw.extent.width, fullRaw.extent.height)
+                if maxSide > 2500 {
+                    let scale = 2500.0 / maxSide
+                    rawCIImage = fullRaw.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+                } else {
+                    rawCIImage = fullRaw
+                }
+                isRAWSource = true
+            } else {
+                rawCIImage = nil
+                fullResRawCIImage = nil
+                isRAWSource = false
+            }
+        } else {
+            rawCIImage = nil
+            fullResRawCIImage = nil
+            isRAWSource = false
+        }
+
         cameraService.stopSession()
         showPresetLoading = true
 
@@ -105,7 +137,9 @@ final class EditorViewModel: ObservableObject {
         fullResSourceImage = nil
         sourceImage = nil
         editedImage = nil
-        rawData = nil
+        rawCIImage = nil
+        fullResRawCIImage = nil
+        isRAWSource = false
         selectedPreset = .matrix
         exposure = 0.0
         contrast = 0.0
@@ -119,17 +153,23 @@ final class EditorViewModel: ObservableObject {
         pickerItem = nil
     }
 
-    /// Renders the current edits at full resolution for export.
+    /// Renders the current edits at full resolution for export (JPEG output).
+    /// Prefers RAW source for maximum quality.
     func renderFullResolution() -> UIImage? {
-        guard let fullRes = fullResSourceImage,
-              let inputImage = CIImage(image: fullRes)
-        else {
+        // Prefer full-res RAW CIImage over HEVC UIImage
+        let inputImage: CIImage
+        if let fullResRawCIImage {
+            inputImage = fullResRawCIImage
+        } else if let fullRes = fullResSourceImage, let ci = CIImage(image: fullRes) {
+            inputImage = ci
+        } else {
             return editedImage
         }
+
         return autoreleasepool {
             let output = applyFilterChain(to: inputImage)
             guard let cgImage = context.createCGImage(output, from: output.extent) else {
-                return fullRes
+                return fullResSourceImage
             }
             return UIImage(cgImage: cgImage)
         }
@@ -174,12 +214,21 @@ final class EditorViewModel: ObservableObject {
     }
 
     private func applyEdits() {
-        guard let sourceImage,
-              let inputImage = CIImage(image: sourceImage)
-        else {
+        guard sourceImage != nil else {
             editedImage = nil
             return
         }
+        // Prefer RAW CIImage (14-bit sensor data) over HEVC UIImage (8-bit)
+        let inputImage: CIImage
+        if let rawCIImage {
+            inputImage = rawCIImage
+        } else if let sourceImage, let ci = CIImage(image: sourceImage) {
+            inputImage = ci
+        } else {
+            editedImage = nil
+            return
+        }
+
         let rendered: UIImage? = autoreleasepool {
             let output = applyFilterChain(to: inputImage)
             guard let cgImage = context.createCGImage(output, from: output.extent) else {
@@ -265,6 +314,119 @@ final class EditorViewModel: ObservableObject {
             temp.inputImage = output
             temp.neutral = CIVector(x: 6500, y: 0)
             temp.targetNeutral = CIVector(x: 7600, y: 22)
+            return temp.outputImage ?? output
+
+        case .sinCity:
+            // Sin City: near-monochrome, extreme contrast, noir
+            // Luminance-weighted desaturation with boosted red channel (brighter skin tones)
+            let matrix = CIFilter.colorMatrix()
+            matrix.inputImage = image
+            matrix.rVector = CIVector(x: 0.35, y: 0.55, z: 0.10, w: 0.0)
+            matrix.gVector = CIVector(x: 0.35, y: 0.55, z: 0.10, w: 0.0)
+            matrix.bVector = CIVector(x: 0.35, y: 0.55, z: 0.10, w: 0.0)
+            matrix.aVector = CIVector(x: 0.0, y: 0.0, z: 0.0, w: 1.0)
+            matrix.biasVector = CIVector(x: 0.0, y: 0.0, z: 0.0, w: 0.0)
+            var output = matrix.outputImage ?? image
+
+            // High contrast, full desaturation (already B&W from matrix), slight darkening
+            let controls = CIFilter.colorControls()
+            controls.inputImage = output
+            controls.saturation = 0.0
+            controls.contrast = 1.45
+            controls.brightness = 0.02
+            output = controls.outputImage ?? output
+
+            // Crush shadows, push highlights for stencil noir feel
+            let shadowHighlight = CIFilter.highlightShadowAdjust()
+            shadowHighlight.inputImage = output
+            shadowHighlight.shadowAmount = -0.5
+            shadowHighlight.highlightAmount = 0.7
+            output = shadowHighlight.outputImage ?? output
+
+            // Slight exposure push to open up highlights
+            let exposureFilter = CIFilter.exposureAdjust()
+            exposureFilter.inputImage = output
+            exposureFilter.ev = 0.3
+            output = exposureFilter.outputImage ?? output
+
+            // Slightly cool temperature for noir feel
+            let temp = CIFilter.temperatureAndTint()
+            temp.inputImage = output
+            temp.neutral = CIVector(x: 6500, y: 0)
+            temp.targetNeutral = CIVector(x: 6200, y: 0)
+            return temp.outputImage ?? output
+
+        case .theBatman:
+            // The Batman 2022: dark, desaturated, bleach bypass, teal shadows, crushed blacks
+            let matrix = CIFilter.colorMatrix()
+            matrix.inputImage = image
+            // Desaturate reds, cool skin tones
+            matrix.rVector = CIVector(x: 0.90, y: 0.07, z: 0.03, w: 0.0)
+            // Dusty greens, slight cross-contamination
+            matrix.gVector = CIVector(x: 0.05, y: 0.92, z: 0.06, w: 0.0)
+            // Suppress pure blue, create teal shadows via green bleed
+            matrix.bVector = CIVector(x: 0.02, y: 0.10, z: 0.78, w: 0.0)
+            matrix.aVector = CIVector(x: 0.0, y: 0.0, z: 0.0, w: 1.0)
+            // Lift blacks slightly with blue bias (prevents pure black)
+            matrix.biasVector = CIVector(x: 0.01, y: 0.012, z: 0.018, w: 0.0)
+            var output = matrix.outputImage ?? image
+
+            // Bleach bypass desaturation + chiaroscuro contrast
+            let controls = CIFilter.colorControls()
+            controls.inputImage = output
+            controls.saturation = 0.65
+            controls.contrast = 1.25
+            controls.brightness = -0.02
+            output = controls.outputImage ?? output
+
+            // Cool temperature shift with slight green tint (teal Gotham)
+            let temp = CIFilter.temperatureAndTint()
+            temp.inputImage = output
+            temp.neutral = CIVector(x: 6500, y: 0)
+            temp.targetNeutral = CIVector(x: 5400, y: -10)
+            output = temp.outputImage ?? output
+
+            // Dark overall feel ~1/3 stop under
+            let exposureFilter = CIFilter.exposureAdjust()
+            exposureFilter.inputImage = output
+            exposureFilter.ev = -0.4
+            output = exposureFilter.outputImage ?? output
+
+            // Crush shadows, soft highlight roll-off
+            let shadowHighlight = CIFilter.highlightShadowAdjust()
+            shadowHighlight.inputImage = output
+            shadowHighlight.shadowAmount = -0.3
+            shadowHighlight.highlightAmount = 0.85
+            return shadowHighlight.outputImage ?? output
+
+        case .strangerThings:
+            // Stranger Things: warm 80s amber, muted vintage, nostalgic high contrast
+            let matrix = CIFilter.colorMatrix()
+            matrix.inputImage = image
+            // Boost red, pull warmth from green (amber skin tones)
+            matrix.rVector = CIVector(x: 1.08, y: 0.08, z: 0.0, w: 0.0)
+            // Slight red cross-bleed, reduce green (faded film stock)
+            matrix.gVector = CIVector(x: 0.06, y: 0.92, z: 0.0, w: 0.0)
+            // Suppress blue strongly, tiny green cross-talk (teal shadow undertone)
+            matrix.bVector = CIVector(x: 0.0, y: 0.06, z: 0.82, w: 0.0)
+            matrix.aVector = CIVector(x: 0.0, y: 0.0, z: 0.0, w: 1.0)
+            // Warm lifted shadows (brown tint), pull blue down
+            matrix.biasVector = CIVector(x: 0.04, y: 0.02, z: -0.02, w: 0.0)
+            var output = matrix.outputImage ?? image
+
+            // Muted vintage desaturation, high contrast
+            let controls = CIFilter.colorControls()
+            controls.inputImage = output
+            controls.saturation = 0.85
+            controls.contrast = 1.15
+            controls.brightness = -0.01
+            output = controls.outputImage ?? output
+
+            // Deep warm amber shift (tungsten/incandescent feel), slight magenta tint
+            let temp = CIFilter.temperatureAndTint()
+            temp.inputImage = output
+            temp.neutral = CIVector(x: 6500, y: 0)
+            temp.targetNeutral = CIVector(x: 4800, y: 10)
             return temp.outputImage ?? output
         }
     }

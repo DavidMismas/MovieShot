@@ -20,12 +20,11 @@ final class CameraService: NSObject, ObservableObject {
     @Published private(set) var availableLenses: [CameraLens] = []
     @Published private(set) var currentPosition: AVCaptureDevice.Position = .back
     @Published private(set) var selectedLens: CameraLens?
-    @Published private(set) var isRAWAvailable = false
-    @Published var isRAWEnabled = false
     /// Incremented each time the active camera device changes, so the preview view can re-evaluate rotation.
     @Published private(set) var deviceChangeCount = 0
 
     let session = AVCaptureSession()
+    /// Callback delivers (hevcImage, rawDNGData?). rawDNGData is non-nil when RAW capture succeeded.
     var onPhoto: ((UIImage, Data?) -> Void)?
 
     private let photoOutput = AVCapturePhotoOutput()
@@ -34,11 +33,11 @@ final class CameraService: NSObject, ObservableObject {
     private var captureRotationCoordinator: AVCaptureDevice.RotationCoordinator?
     private var captureRotationObservation: NSKeyValueObservation?
 
+    /// Tracks in-flight RAW+HEVC captures (RAW fires two didFinishProcessingPhoto callbacks).
     private struct PendingCapture {
-        var image: UIImage?
+        var hevcImage: UIImage?
         var rawData: Data?
     }
-
     private var pendingCaptures: [Int64: PendingCapture] = [:]
 
     override init() {
@@ -78,7 +77,6 @@ final class CameraService: NSObject, ObservableObject {
         defer {
             session.commitConfiguration()
             isConfigured = true
-            refreshRAWAvailability()
         }
 
         if session.canAddOutput(photoOutput) {
@@ -127,8 +125,9 @@ final class CameraService: NSObject, ObservableObject {
         guard isSessionRunning else { return }
 
         let settings: AVCapturePhotoSettings
-        if isRAWEnabled,
-           let rawType = photoOutput.availableRawPhotoPixelFormatTypes.first {
+
+        // Always capture RAW + HEVC when RAW is available (better data for editing)
+        if let rawType = photoOutput.availableRawPhotoPixelFormatTypes.first {
             settings = AVCapturePhotoSettings(
                 rawPixelFormatType: rawType,
                 processedFormat: [AVVideoCodecKey: AVVideoCodecType.hevc]
@@ -146,7 +145,10 @@ final class CameraService: NSObject, ObservableObject {
         }
 
         settings.maxPhotoDimensions = photoOutput.maxPhotoDimensions
-        settings.photoQualityPrioritization = .balanced
+        // photoQualityPrioritization is unsupported when capturing RAW
+        if photoOutput.availableRawPhotoPixelFormatTypes.isEmpty {
+            settings.photoQualityPrioritization = .balanced
+        }
         photoOutput.capturePhoto(with: settings, delegate: self)
     }
 
@@ -235,7 +237,6 @@ final class CameraService: NSObject, ObservableObject {
                 session.commitConfiguration()
                 selectedLens = lens
                 updateMaxPhotoDimensions()
-                refreshRAWAvailability()
             }
 
             if let currentInput {
@@ -260,13 +261,6 @@ final class CameraService: NSObject, ObservableObject {
             device.unlockForConfiguration()
         } catch {
             print("Zoom error: \(error)")
-        }
-    }
-
-    private func refreshRAWAvailability() {
-        isRAWAvailable = !photoOutput.availableRawPhotoPixelFormatTypes.isEmpty
-        if !isRAWAvailable {
-            isRAWEnabled = false
         }
     }
 
@@ -338,10 +332,11 @@ extension CameraService: AVCapturePhotoCaptureDelegate {
         var pending = pendingCaptures[captureID] ?? PendingCapture()
 
         if photo.isRawPhoto {
+            // Store the DNG data for RAW-based editing
             pending.rawData = photo.fileDataRepresentation()
         } else if let data = photo.fileDataRepresentation(),
                   let image = UIImage(data: data) {
-            pending.image = image
+            pending.hevcImage = image
         }
 
         pendingCaptures[captureID] = pending
@@ -352,17 +347,14 @@ extension CameraService: AVCapturePhotoCaptureDelegate {
         didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings,
         error: Error?
     ) {
-        guard error == nil else { return }
-
         let captureID = resolvedSettings.uniqueID
-        guard let pending = pendingCaptures[captureID],
-              let image = pending.image
+        guard let pending = pendingCaptures.removeValue(forKey: captureID),
+              let image = pending.hevcImage
         else {
             pendingCaptures[captureID] = nil
             return
         }
 
-        pendingCaptures[captureID] = nil
         DispatchQueue.main.async { [weak self] in
             self?.onPhoto?(image, pending.rawData)
         }
