@@ -4,13 +4,18 @@ import SwiftUI
 
 /// Manages the one-time Pro upgrade purchase using StoreKit 2.
 ///
-/// Debug / TestFlight bypass:
-///   - Set `MovieShot_ProUnlocked=1` in the scheme's environment variables, OR
-///   - Build with `DEBUG` configuration — isPro will always be true in DEBUG builds.
+/// Bypass options (for testing):
+///   DEBUG builds   — Pro is always unlocked by default.
+///                    Set env var `CineShoot_ProUnlocked=0` in the scheme to test the free flow.
+///   RELEASE builds — Pro is always locked by default (normal App Store / TestFlight behaviour).
+///                    Set env var `CineShoot_ProUnlocked=1` in the scheme to test Pro without buying.
+///                    (Scheme env vars are stripped by App Store — safe to ship.)
 @MainActor
 final class StoreService: ObservableObject {
 
-    static let proProductID = "com.david.MovieShot.pro"
+    static let proProductID = "com.david.CineShoot.pro"
+
+    private static let bypassEnvVar = "CineShoot_ProUnlocked"
 
     @Published private(set) var isPro: Bool = false
     @Published private(set) var proProduct: Product?
@@ -26,10 +31,17 @@ final class StoreService: ObservableObject {
 
     init() {
         #if DEBUG
-        // In DEBUG builds, always unlock Pro — use env var to test the free experience.
-        if ProcessInfo.processInfo.environment["MovieShot_ProUnlocked"] == "1" {
-            isPro = false
+        // DEBUG: unlock by default; opt-out with CineShoot_ProUnlocked=0
+        let debugOverride = ProcessInfo.processInfo.environment[Self.bypassEnvVar]
+        if debugOverride == "0" {
+            // fall through to normal StoreKit flow for testing
         } else {
+            isPro = true
+            return
+        }
+        #else
+        // RELEASE / TestFlight: opt-in bypass with CineShoot_ProUnlocked=1 (scheme only, stripped by App Store)
+        if ProcessInfo.processInfo.environment[Self.bypassEnvVar] == "1" {
             isPro = true
             return
         }

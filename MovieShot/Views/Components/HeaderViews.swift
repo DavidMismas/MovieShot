@@ -8,7 +8,7 @@ struct TitleBlock: View {
     var body: some View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Movira")
+                Text("Cineshoot")
                     .font(.system(size: 30, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
                 Text("cinematic photo camera grading")

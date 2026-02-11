@@ -7,13 +7,13 @@
       "internalID" : "6E57B0EC-1111-0000-0000-000000000001",
       "localizations" : [
         {
-          "description" : "Unlock all 8 cinematic movie presets in Movira.",
-          "displayName" : "Movira Pro",
+          "description" : "Unlock all 8 cinematic movie presets in Cineshoot.",
+          "displayName" : "Cineshoot Pro",
           "locale" : "en_US"
         }
       ],
-      "productID" : "com.david.MovieShot.pro",
-      "referenceName" : "Movira Pro",
+      "productID" : "com.david.CineShoot.pro",
+      "referenceName" : "Cineshoot Pro",
       "type" : "NonConsumable"
     }
   ],

@@ -38,7 +38,7 @@ struct SettingsSheet: View {
                         HStack(spacing: 8) {
                             Image(systemName: "checkmark.seal.fill")
                                 .foregroundStyle(cinemaAmber)
-                            Text("Movira Pro — Unlocked")
+                            Text("Cineshoot Pro — Unlocked")
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(.white)
                             Spacer()
@@ -50,7 +50,7 @@ struct SettingsSheet: View {
                             HStack(spacing: 8) {
                                 Image(systemName: "lock.open.fill")
                                     .foregroundStyle(cinemaAmber)
-                                Text("Unlock Movira Pro")
+                                Text("Unlock Cineshoot Pro")
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundStyle(cinemaAmber)
                                 Spacer()

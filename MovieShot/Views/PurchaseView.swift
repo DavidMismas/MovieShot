@@ -29,7 +29,7 @@ struct PurchaseView: View {
                             .font(.system(size: 52, weight: .light))
                             .foregroundStyle(cinemaAmber)
 
-                        Text("Movira Pro")
+                        Text("Cineshoot Pro")
                             .font(.title.bold())
                             .foregroundStyle(.white)
 
@@ -163,9 +163,9 @@ struct PurchaseView: View {
 
     private var purchaseButtonLabel: String {
         if let product = store.proProduct {
-            return "Unlock Pro — \(product.displayPrice)"
+            return "Unlock Cineshoot Pro — \(product.displayPrice)"
         }
-        return "Unlock Pro"
+        return "Unlock Cineshoot Pro"
     }
 
     private func presetIcon(for preset: MoviePreset) -> String {
