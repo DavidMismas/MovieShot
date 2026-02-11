@@ -70,11 +70,11 @@ enum MoviePreset: String, CaseIterable, Identifiable {
         case .bladeRunner2049: return "Runner 2094"
         case .sinCity: return "Hell City"
         case .theBatman: return "Darkman"
-        case .strangerThings: return "Weirder Things"
+        case .strangerThings: return "Weird Things"
         case .dune: return "Arrakis Dust"
-        case .drive: return "Neon Night"
+        case .drive: return "Night Drive"
         case .madMax: return "Fury Heat"
-        case .revenant: return "Natural Cold"
+        case .revenant: return "Risen One"
         case .inTheMoodForLove: return "Mood for Love"
         }
     }
