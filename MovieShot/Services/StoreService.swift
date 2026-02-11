@@ -13,7 +13,7 @@ import SwiftUI
 @MainActor
 final class StoreService: ObservableObject {
 
-    nonisolated static let proProductID = "com.david.CineShoot.pro"
+    static let proProductID = "com.david.CineShoot.pro"
 
     @Published private(set) var isPro: Bool = false
     @Published private(set) var proProduct: Product?
@@ -41,13 +41,11 @@ final class StoreService: ObservableObject {
 
         transactionListenerTask = listenForTransactions()
 
-        // Run all StoreKit network work on a background thread so it never
-        // blocks the main actor — camera session startup must not be delayed.
-        Task.detached(priority: .utility) { [weak self] in
+        Task { [weak self] in
             #if !DEBUG
-            // TestFlight: unlock Pro automatically for testers.
-            if await Self.checkIsTestFlight() {
-                await MainActor.run { self?.isPro = true }
+            // TestFlight uses the StoreKit sandbox environment.
+            if await Self.isSandboxStoreEnvironment() {
+                self?.isPro = true
                 return
             }
             #endif
@@ -56,12 +54,11 @@ final class StoreService: ObservableObject {
         }
     }
 
-    /// Returns `true` when running under TestFlight.
-    /// TestFlight uses the `.sandbox` StoreKit environment; App Store uses `.production`.
-    nonisolated static func checkIsTestFlight() async -> Bool {
+    /// Returns `true` in StoreKit sandbox environments (for example TestFlight).
+    nonisolated private static func isSandboxStoreEnvironment() async -> Bool {
         guard let result = try? await AppTransaction.shared else { return false }
-        if case .verified(let tx) = result {
-            return tx.environment == .sandbox
+        if case .verified(let transaction) = result {
+            return transaction.environment == .sandbox
         }
         return false
     }
@@ -108,21 +105,20 @@ final class StoreService: ObservableObject {
 
     // MARK: - Private
 
-    nonisolated private func loadProduct() async {
+    private func loadProduct() async {
         do {
             let products = try await Product.products(for: [Self.proProductID])
-            let product = products.first
-            await MainActor.run { self.proProduct = product }
+            proProduct = products.first
         } catch {
             // Product load failure is non-fatal; purchase button will be disabled
         }
     }
 
-    nonisolated private func refreshPurchaseStatus() async {
+    private func refreshPurchaseStatus() async {
         for await result in Transaction.currentEntitlements {
             if let transaction = try? checkVerified(result),
                transaction.productID == Self.proProductID {
-                await MainActor.run { self.isPro = true }
+                isPro = true
                 return
             }
         }
@@ -141,7 +137,7 @@ final class StoreService: ObservableObject {
         }
     }
 
-    nonisolated private func checkVerified<T>(_ result: VerificationResult<T>) throws -> T {
+    private func checkVerified<T>(_ result: VerificationResult<T>) throws -> T {
         switch result {
         case .unverified:
             throw StoreError.failedVerification
