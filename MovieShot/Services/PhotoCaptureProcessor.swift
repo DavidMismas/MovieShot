@@ -2,26 +2,33 @@
 import Foundation
 
 final class PhotoCaptureProcessor: NSObject, AVCapturePhotoCaptureDelegate, @unchecked Sendable {
-    private let settings: AVCapturePhotoSettings
-    nonisolated private let completionHandler: (Data?) -> Void
-    nonisolated(unsafe) private var photoData: Data?
+    nonisolated private let completionHandler: (CameraCaptureResult) -> Void
+    nonisolated(unsafe) private var processedPhotoData: Data?
+    nonisolated(unsafe) private var rawPhotoData: Data?
 
-    init(with settings: AVCapturePhotoSettings, completion: @escaping (Data?) -> Void) {
-        self.settings = settings
+    init(completion: @escaping (CameraCaptureResult) -> Void) {
         self.completionHandler = completion
     }
 
     nonisolated func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         guard error == nil else { return }
-        photoData = photo.fileDataRepresentation()
+        guard let data = photo.fileDataRepresentation() else { return }
+        if photo.isRawPhoto {
+            rawPhotoData = data
+        } else {
+            processedPhotoData = data
+        }
     }
 
     nonisolated func photoOutput(_ output: AVCapturePhotoOutput, didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings, error: Error?) {
         guard error == nil else { return }
-        let data = photoData
+        let result = CameraCaptureResult(
+            processedData: processedPhotoData,
+            rawData: rawPhotoData
+        )
         let handler = completionHandler
         DispatchQueue.main.async {
-            handler(data)
+            handler(result)
         }
     }
 }

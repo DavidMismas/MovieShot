@@ -1,0 +1,28 @@
+{
+  "identifier" : "6E57B0EC",
+  "nonConsumableProducts" : [
+    {
+      "displayPrice" : "2.99",
+      "familySharable" : true,
+      "internalID" : "6E57B0EC-1111-0000-0000-000000000001",
+      "localizations" : [
+        {
+          "description" : "Unlock all 8 cinematic movie presets in Movira.",
+          "displayName" : "Movira Pro",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.david.MovieShot.pro",
+      "referenceName" : "Movira Pro",
+      "type" : "NonConsumable"
+    }
+  ],
+  "settings" : {
+    "_timeRate" : "MONTHLY_RENEWAL_EVERY_30_MINUTES"
+  },
+  "version" : {
+    "major" : 3,
+    "minor" : 0,
+    "patch" : 0
+  }
+}

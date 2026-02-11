@@ -67,8 +67,14 @@ struct SourceControls: View {
     private var lensControl: some View {
         Menu {
             ForEach(viewModel.cameraService.availableLenses) { lens in
-                Button(lens.name) {
+                Button {
                     viewModel.cameraService.selectLens(lens)
+                } label: {
+                    if lens.id == viewModel.cameraService.selectedLens?.id {
+                        Label(lens.name, systemImage: "checkmark")
+                    } else {
+                        Text(lens.name)
+                    }
                 }
             }
         } label: {
@@ -91,8 +97,10 @@ struct SourceControls: View {
 
     private var shutterControl: some View {
         Button {
-            let generator = UIImpactFeedbackGenerator(style: .rigid)
-            generator.impactOccurred(intensity: 1.0)
+            if viewModel.cameraService.hapticsEnabled {
+                let generator = UIImpactFeedbackGenerator(style: .rigid)
+                generator.impactOccurred(intensity: 1.0)
+            }
             viewModel.captureFromCamera()
         } label: {
             ZStack {

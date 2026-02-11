@@ -33,7 +33,7 @@ enum CropOption: String, CaseIterable, Identifiable {
         }
     }
 
-    var ratio: CGFloat? {
+    nonisolated var ratio: CGFloat? {
         switch self {
         case .original: return nil
         case .fourByFive: return 4.0 / 5.0
@@ -42,7 +42,7 @@ enum CropOption: String, CaseIterable, Identifiable {
     }
 
     /// When true, the crop is always landscape (width > height), never swapped.
-    var forceHorizontal: Bool {
+    nonisolated var forceHorizontal: Bool {
         switch self {
         case .cinema21by9: return true
         default: return false
@@ -56,6 +56,11 @@ enum MoviePreset: String, CaseIterable, Identifiable {
     case sinCity
     case theBatman
     case strangerThings
+    case dune
+    case drive
+    case madMax
+    case revenant
+    case inTheMoodForLove
 
     var id: String { rawValue }
 
@@ -66,16 +71,34 @@ enum MoviePreset: String, CaseIterable, Identifiable {
         case .sinCity: return "Hell City"
         case .theBatman: return "Darkman"
         case .strangerThings: return "Weirder Things"
+        case .dune: return "Arrakis Dust"
+        case .drive: return "Neon Night"
+        case .madMax: return "Fury Heat"
+        case .revenant: return "Natural Cold"
+        case .inTheMoodForLove: return "Mood for Love"
+        }
+    }
+
+    /// Free presets: matrix, bladeRunner2049. All others require Pro.
+    var isProLocked: Bool {
+        switch self {
+        case .matrix, .bladeRunner2049: return false
+        default: return true
         }
     }
 
     var subtitle: String {
         switch self {
         case .matrix: return "Green cast, cooler mids, high contrast"
-        case .bladeRunner2049: return "Warm highlights, teal shadows, bold contrast"
+        case .bladeRunner2049: return "Orange highlights, teal-purple shadows, wide dynamic range"
         case .sinCity: return "High contrast B&W, crushed shadows, noir"
         case .theBatman: return "Dark desaturated, teal shadows, crushed blacks"
-        case .strangerThings: return "Warm amber tones, muted vintage, nostalgic"
+        case .strangerThings: return "Kodachrome amber, teal shadows, vivid 80s palette"
+        case .dune: return "Dusty amber desert, cool shadows, cinematic haze"
+        case .drive: return "Magenta-cyan neon, glossy blacks, night contrast"
+        case .madMax: return "Aggressive orange-teal, gritty contrast, heat"
+        case .revenant: return "Cold desaturated earth, natural dramatic tone"
+        case .inTheMoodForLove: return "Rich tungsten reds, jade greens, soft glow"
         }
     }
 }

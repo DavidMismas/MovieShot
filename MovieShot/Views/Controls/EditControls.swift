@@ -2,11 +2,14 @@ import SwiftUI
 
 struct EditControls: View {
     @ObservedObject var viewModel: EditorViewModel
-    
+    @EnvironmentObject var store: StoreService
+
+    @State private var showPurchaseView = false
+
     private let cinemaAmber = Color(red: 0.96, green: 0.69, blue: 0.27)
     private let cinemaTeal = Color(red: 0.22, green: 0.74, blue: 0.79)
     private let panelBackground = Color.black.opacity(0.28)
-    
+
     var body: some View {
         Group {
             switch viewModel.step {
@@ -20,43 +23,25 @@ struct EditControls: View {
                 EmptyView()
             }
         }
+        .sheet(isPresented: $showPurchaseView) {
+            PurchaseView()
+                .environmentObject(store)
+        }
     }
-    
+
     private var presetControls: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 10) {
                 ForEach(MoviePreset.allCases) { preset in
+                    let locked = preset.isProLocked && !store.isPro
                     Button {
-                        viewModel.selectedPreset = preset
-                    } label: {
-                        VStack(spacing: 8) {
-                            Image(systemName: presetIcon(for: preset))
-                                .font(.title2)
-                                .foregroundStyle(preset == viewModel.selectedPreset ? cinemaAmber : .white.opacity(0.6))
-
-                            Text(preset.title)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.white)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.7)
-
-                            Text(preset.subtitle)
-                                .font(.caption2)
-                                .foregroundStyle(.white.opacity(0.6))
-                                .lineLimit(2)
-                                .multilineTextAlignment(.center)
+                        if locked {
+                            showPurchaseView = true
+                        } else {
+                            viewModel.selectedPreset = preset
                         }
-                        .frame(width: 120)
-                        .padding(.vertical, 12)
-                        .padding(.horizontal, 8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 14)
-                                .fill(preset == viewModel.selectedPreset ? .white.opacity(0.12) : .white.opacity(0.05))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14)
-                                .stroke(preset == viewModel.selectedPreset ? cinemaTeal : .clear, lineWidth: 1.5)
-                        )
+                    } label: {
+                        presetCell(preset: preset, locked: locked)
                     }
                     .buttonStyle(.plain)
                 }
@@ -66,7 +51,62 @@ struct EditControls: View {
         .padding(.vertical, 12)
         .background(backgroundStyle)
     }
-    
+
+    @ViewBuilder
+    private func presetCell(preset: MoviePreset, locked: Bool) -> some View {
+        let isSelected = preset == viewModel.selectedPreset
+
+        ZStack(alignment: .topTrailing) {
+            VStack(spacing: 8) {
+                Image(systemName: presetIcon(for: preset))
+                    .font(.title2)
+                    .foregroundStyle(
+                        locked
+                            ? .white.opacity(0.3)
+                            : (isSelected ? cinemaAmber : .white.opacity(0.6))
+                    )
+
+                Text(preset.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(locked ? .white.opacity(0.4) : .white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+
+                Text(preset.subtitle)
+                    .font(.caption2)
+                    .foregroundStyle(locked ? .white.opacity(0.3) : .white.opacity(0.6))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(width: 120)
+            .padding(.vertical, 12)
+            .padding(.horizontal, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(isSelected && !locked
+                          ? .white.opacity(0.12)
+                          : .white.opacity(0.05))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(
+                        isSelected && !locked ? cinemaTeal : .clear,
+                        lineWidth: 1.5
+                    )
+            )
+
+            // Lock badge
+            if locked {
+                Image(systemName: "lock.fill")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.white.opacity(0.55))
+                    .padding(5)
+                    .background(Circle().fill(Color.black.opacity(0.55)))
+                    .offset(x: -6, y: 6)
+            }
+        }
+    }
+
     private var adjustControls: some View {
         VStack(spacing: 12) {
             adjustmentSlider(title: "Exposure", value: $viewModel.exposure, range: -2.0...2.0)
@@ -77,7 +117,7 @@ struct EditControls: View {
         .padding(12)
         .background(backgroundStyle)
     }
-    
+
     private var cropControls: some View {
         VStack(alignment: .leading, spacing: 10) {
             Label("Crop ratio", systemImage: "crop.rotate")
@@ -94,7 +134,7 @@ struct EditControls: View {
         .padding(12)
         .background(backgroundStyle)
     }
-    
+
     private func adjustmentSlider(title: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("\(title): \(String(format: "%.2f", value.wrappedValue))")
@@ -104,7 +144,7 @@ struct EditControls: View {
                 .tint(cinemaAmber)
         }
     }
-    
+
     private var backgroundStyle: some View {
         RoundedRectangle(cornerRadius: 16, style: .continuous)
             .fill(panelBackground)
@@ -113,7 +153,7 @@ struct EditControls: View {
                     .stroke(.white.opacity(0.15), lineWidth: 1)
             )
     }
-    
+
     private func presetIcon(for preset: MoviePreset) -> String {
         switch preset {
         case .matrix: return "cpu"
@@ -121,6 +161,11 @@ struct EditControls: View {
         case .sinCity: return "circle.lefthalf.filled"
         case .theBatman: return "moon.fill"
         case .strangerThings: return "sparkles.tv.fill"
+        case .dune: return "sun.max.fill"
+        case .drive: return "car.fill"
+        case .madMax: return "flame.fill"
+        case .revenant: return "snowflake"
+        case .inTheMoodForLove: return "heart.fill"
         }
     }
 }

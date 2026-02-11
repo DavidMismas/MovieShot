@@ -14,16 +14,45 @@ struct CameraLens: Identifiable, Hashable {
     let sortOrder: Int
 }
 
+struct CameraCaptureResult {
+    let processedData: Data?
+    let rawData: Data?
+}
+
 final class CameraService: NSObject, ObservableObject {
+    private enum PreferenceKey {
+        static let hapticsEnabled = "camera.hapticsEnabled"
+        static let shutterSoundEnabled = "camera.shutterSoundEnabled"
+        static let appleProRAWEnabled = "camera.appleProRAWEnabled"
+    }
+
     @Published private(set) var authorizationStatus: AVAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
     @Published private(set) var isSessionRunning = false
     @Published private(set) var availableLenses: [CameraLens] = []
     @Published private(set) var currentPosition: AVCaptureDevice.Position = .back
     @Published private(set) var selectedLens: CameraLens?
     @Published private(set) var deviceChangeCount = 0
+    @Published private(set) var appleProRAWSupported = false
+    @Published private(set) var appleProRAWActive = false
+    @Published var hapticsEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(hapticsEnabled, forKey: PreferenceKey.hapticsEnabled)
+        }
+    }
+    @Published var shutterSoundEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(shutterSoundEnabled, forKey: PreferenceKey.shutterSoundEnabled)
+        }
+    }
+    @Published var appleProRAWEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(appleProRAWEnabled, forKey: PreferenceKey.appleProRAWEnabled)
+            refreshAppleProRAWConfiguration()
+        }
+    }
 
     let session = AVCaptureSession()
-    var onPhoto: ((UIImage) -> Void)?
+    var onPhotoCapture: ((CameraCaptureResult) -> Void)?
 
     private let photoOutput = AVCapturePhotoOutput()
     private var currentInput: AVCaptureDeviceInput?
@@ -59,6 +88,9 @@ final class CameraService: NSObject, ObservableObject {
             mediaType: .video,
             position: .front
         )
+        self.hapticsEnabled = UserDefaults.standard.object(forKey: PreferenceKey.hapticsEnabled) as? Bool ?? true
+        self.shutterSoundEnabled = UserDefaults.standard.object(forKey: PreferenceKey.shutterSoundEnabled) as? Bool ?? true
+        self.appleProRAWEnabled = UserDefaults.standard.object(forKey: PreferenceKey.appleProRAWEnabled) as? Bool ?? false
 
         super.init()
         session.sessionPreset = .photo
@@ -70,15 +102,21 @@ final class CameraService: NSObject, ObservableObject {
 
     func capturePhoto() {
         guard isSessionRunning else { return }
+        let shouldSuppressShutterSound = !shutterSoundEnabled
 
         sessionQueue.async { [weak self] in
             guard let self else { return }
+            self.updateAppleProRAWAvailability(inConfiguration: false)
 
+            let processedFormat: [String: Any] = [AVVideoCodecKey: self.preferredProcessedCodec()]
             let settings: AVCapturePhotoSettings
-            if self.photoOutput.availablePhotoCodecTypes.contains(.hevc) {
-                settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.hevc])
+            if let rawPixelType = self.preferredAppleProRAWPixelFormatForCapture() {
+                settings = AVCapturePhotoSettings(
+                    rawPixelFormatType: rawPixelType,
+                    processedFormat: processedFormat
+                )
             } else {
-                settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
+                settings = AVCapturePhotoSettings(format: processedFormat)
             }
 
             if let connection = self.photoOutput.connection(with: .video),
@@ -91,20 +129,32 @@ final class CameraService: NSObject, ObservableObject {
                 settings.maxPhotoDimensions = outputDimensions
             }
             settings.photoQualityPrioritization = .balanced
+            if #available(iOS 18.0, *),
+               shouldSuppressShutterSound,
+               self.photoOutput.isShutterSoundSuppressionSupported {
+                settings.isShutterSoundSuppressionEnabled = true
+            }
 
-            let processor = PhotoCaptureProcessor(with: settings) { [weak self] hevcData in
+            let processor = PhotoCaptureProcessor { [weak self] result in
                 guard let self else { return }
                 self.activeProcessors[settings.uniqueID] = nil
-                if let hevcData, let image = UIImage(data: hevcData) {
-                    self.onPhoto?(image)
-                } else {
+                if result.processedData == nil && result.rawData == nil {
                     print("CameraService: Photo capture failed (no data)")
+                    return
                 }
+                self.onPhotoCapture?(result)
             }
 
             self.activeProcessors[settings.uniqueID] = processor
             self.photoOutput.capturePhoto(with: settings, delegate: processor)
         }
+    }
+
+    var isShutterSoundToggleAvailable: Bool {
+        if #available(iOS 18.0, *) {
+            return photoOutput.isShutterSoundSuppressionSupported
+        }
+        return false
     }
 
     func requestPermissionIfNeeded() {
@@ -142,6 +192,7 @@ final class CameraService: NSObject, ObservableObject {
             if self.session.canAddOutput(self.photoOutput) {
                 self.session.addOutput(self.photoOutput)
             }
+            self.updateAppleProRAWAvailability(inConfiguration: true)
             self.session.commitConfiguration()
 
             self.isConfigured = true
@@ -194,6 +245,44 @@ final class CameraService: NSObject, ObservableObject {
             guard let self else { return }
             guard lens.position == self.currentPosition else { return }
             self.configureInput(for: lens)
+        }
+    }
+
+    func focusAndExpose(at devicePoint: CGPoint) {
+        sessionQueue.async { [weak self] in
+            guard let self, let device = self.currentInput?.device else { return }
+
+            let point = CGPoint(
+                x: min(max(devicePoint.x, 0.0), 1.0),
+                y: min(max(devicePoint.y, 0.0), 1.0)
+            )
+
+            do {
+                try device.lockForConfiguration()
+                defer { device.unlockForConfiguration() }
+
+                if device.isFocusPointOfInterestSupported {
+                    device.focusPointOfInterest = point
+                    if device.isFocusModeSupported(.continuousAutoFocus) {
+                        device.focusMode = .continuousAutoFocus
+                    } else if device.isFocusModeSupported(.autoFocus) {
+                        device.focusMode = .autoFocus
+                    }
+                }
+
+                if device.isExposurePointOfInterestSupported {
+                    device.exposurePointOfInterest = point
+                    if device.isExposureModeSupported(.continuousAutoExposure) {
+                        device.exposureMode = .continuousAutoExposure
+                    } else if device.isExposureModeSupported(.autoExpose) {
+                        device.exposureMode = .autoExpose
+                    }
+                }
+
+                device.isSubjectAreaChangeMonitoringEnabled = true
+            } catch {
+                print("CameraService: focus/exposure error: \(error)")
+            }
         }
     }
 
@@ -266,6 +355,7 @@ final class CameraService: NSObject, ObservableObject {
         if let currentInput, currentInput.device == device {
             applyZoom(lens.zoomFactor, to: device)
             updateMaxPhotoDimensions()
+            updateAppleProRAWAvailability(inConfiguration: false)
             return
         }
 
@@ -289,6 +379,7 @@ final class CameraService: NSObject, ObservableObject {
             session.addInput(input)
             currentInput = input
             applyZoom(lens.zoomFactor, to: device)
+            updateAppleProRAWAvailability(inConfiguration: true)
             setupCaptureRotationCoordinator(for: device)
 
             DispatchQueue.main.async {
@@ -368,6 +459,52 @@ final class CameraService: NSObject, ObservableObject {
         guard let connection = photoOutput.connection(with: .video) else { return }
         if connection.isVideoRotationAngleSupported(angle) {
             connection.videoRotationAngle = angle
+        }
+    }
+
+    private func refreshAppleProRAWConfiguration() {
+        sessionQueue.async { [weak self] in
+            self?.updateAppleProRAWAvailability(inConfiguration: false)
+        }
+    }
+
+    private func preferredProcessedCodec() -> AVVideoCodecType {
+        photoOutput.availablePhotoCodecTypes.contains(.hevc) ? .hevc : .jpeg
+    }
+
+    private func preferredAppleProRAWPixelFormatForCapture() -> OSType? {
+        guard #available(iOS 14.3, *) else { return nil }
+        guard appleProRAWEnabled, photoOutput.isAppleProRAWEnabled else { return nil }
+        return photoOutput.availableRawPhotoPixelFormatTypes.first(where: { type in
+            AVCapturePhotoOutput.isAppleProRAWPixelFormat(type)
+        })
+    }
+
+    private func updateAppleProRAWAvailability(inConfiguration: Bool) {
+        guard #available(iOS 14.3, *) else {
+            DispatchQueue.main.async {
+                self.appleProRAWSupported = false
+                self.appleProRAWActive = false
+            }
+            return
+        }
+
+        let supported = photoOutput.isAppleProRAWSupported
+        let shouldEnablePipeline = supported && appleProRAWEnabled
+        if photoOutput.isAppleProRAWEnabled != shouldEnablePipeline {
+            if inConfiguration {
+                photoOutput.isAppleProRAWEnabled = shouldEnablePipeline
+            } else {
+                session.beginConfiguration()
+                photoOutput.isAppleProRAWEnabled = shouldEnablePipeline
+                session.commitConfiguration()
+            }
+        }
+
+        let active = shouldEnablePipeline && preferredAppleProRAWPixelFormatForCapture() != nil
+        DispatchQueue.main.async {
+            self.appleProRAWSupported = supported
+            self.appleProRAWActive = active
         }
     }
 }

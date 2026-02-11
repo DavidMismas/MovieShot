@@ -44,6 +44,13 @@ struct ContentView: View {
                             loadingSpin = false
                         }
                 }
+
+                if viewModel.showSaveConfirmation {
+                    saveConfirmationToast
+                        .transition(.scale(scale: 0.9).combined(with: .opacity))
+                        .zIndex(10)
+                        .allowsHitTesting(false)
+                }
             }
         }
         .tint(cinemaAmber)
@@ -69,7 +76,7 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showSettings) {
              SettingsSheet(cameraService: viewModel.cameraService)
-                 .presentationDetents([.fraction(0.4)])
+                 .presentationDetents([.fraction(0.55)])
                  .presentationDragIndicator(.visible)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
@@ -193,6 +200,29 @@ struct ContentView: View {
             )
     }
 
+    private var saveConfirmationToast: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(cinemaAmber)
+
+            Text("Image Saved")
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(.white)
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 16)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.black.opacity(0.76))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(.white.opacity(0.2), lineWidth: 1)
+                )
+        )
+        .shadow(color: .black.opacity(0.35), radius: 16, x: 0, y: 8)
+    }
+
     @ViewBuilder
     private var stepControls: some View {
         switch viewModel.step {
@@ -216,20 +246,13 @@ struct ContentView: View {
 
             Spacer()
 
-            Button {
-                viewModel.restart()
-            } label: {
-                Image(systemName: "camera.fill")
-            }
-            .buttonStyle(.bordered)
-
-            Spacer()
-
             if viewModel.step == .final {
-                Button("Start Over") {
+                Button {
                     viewModel.restart()
+                } label: {
+                    Image(systemName: "camera.fill")
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.bordered)
             } else if viewModel.step != .source {
                 Button("Continue") {
                     viewModel.continueStep()
@@ -251,4 +274,5 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
+        .environmentObject(StoreService())
 }

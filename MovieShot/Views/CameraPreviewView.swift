@@ -6,18 +6,21 @@ struct CameraPreviewView: UIViewRepresentable {
     let session: AVCaptureSession
     /// Observed so SwiftUI calls updateUIView when the camera device changes.
     let deviceChangeCount: Int
+    var onTapToFocus: ((CGPoint, CGPoint) -> Void)?
 
     func makeUIView(context: Context) -> PreviewView {
         let view = PreviewView()
         view.videoPreviewLayer.videoGravity = .resizeAspectFill
         view.videoPreviewLayer.session = session
         view.updateDeviceChangeCount(deviceChangeCount)
+        view.onTapToFocus = onTapToFocus
         return view
     }
 
     func updateUIView(_ uiView: PreviewView, context: Context) {
         uiView.videoPreviewLayer.session = session
         uiView.updateDeviceChangeCount(deviceChangeCount)
+        uiView.onTapToFocus = onTapToFocus
         uiView.setupRotationIfReady()
     }
 }
@@ -28,6 +31,17 @@ final class PreviewView: UIView {
     private var sessionObservation: NSObjectProtocol?
     private var trackedDeviceID: String?
     private var lastDeviceChangeCount = -1
+    var onTapToFocus: ((CGPoint, CGPoint) -> Void)?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        setupTapGesture()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setupTapGesture()
+    }
 
     func updateDeviceChangeCount(_ value: Int) {
         guard value != lastDeviceChangeCount else { return }
@@ -120,6 +134,18 @@ final class PreviewView: UIView {
         if clearDeviceID {
             trackedDeviceID = nil
         }
+    }
+
+    private func setupTapGesture() {
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handleTapToFocus(_:)))
+        addGestureRecognizer(tap)
+    }
+
+    @objc private func handleTapToFocus(_ recognizer: UITapGestureRecognizer) {
+        guard recognizer.state == .ended else { return }
+        let layerPoint = recognizer.location(in: self)
+        let devicePoint = videoPreviewLayer.captureDevicePointConverted(fromLayerPoint: layerPoint)
+        onTapToFocus?(layerPoint, devicePoint)
     }
 
     deinit {

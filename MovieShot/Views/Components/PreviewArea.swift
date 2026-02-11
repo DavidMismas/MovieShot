@@ -7,6 +7,12 @@ struct PreviewArea: View {
     @Binding var cropDragStart: CGSize
     @Binding var rotationAngle: Angle
 
+    @State private var focusIndicatorPoint: CGPoint?
+    @State private var focusIndicatorScale: CGFloat = 1.0
+    @State private var focusIndicatorOpacity: Double = 0.0
+    @State private var focusIndicatorHideWorkItem: DispatchWorkItem?
+
+    private let cinemaAmber = Color(red: 0.96, green: 0.69, blue: 0.27)
     private let panelBackground = Color.black.opacity(0.28)
     
     var body: some View {
@@ -39,13 +45,18 @@ struct PreviewArea: View {
     }
     
     private var cameraPreviewWithFlip: some View {
-        ZStack(alignment: .topLeading) {
+        ZStack {
             CameraPreviewView(
                 session: viewModel.cameraService.session,
-                deviceChangeCount: viewModel.cameraService.deviceChangeCount
+                deviceChangeCount: viewModel.cameraService.deviceChangeCount,
+                onTapToFocus: { layerPoint, devicePoint in
+                    viewModel.cameraService.focusAndExpose(at: devicePoint)
+                    showFocusIndicator(at: layerPoint)
+                }
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-
+        }
+        .overlay(alignment: .topLeading) {
             Button {
                 viewModel.cameraService.togglePosition()
             } label: {
@@ -56,7 +67,69 @@ struct PreviewArea: View {
             .tint(.white)
             .padding(10)
         }
+        .overlay(alignment: .topTrailing) {
+            if viewModel.cameraService.appleProRAWActive {
+                Text("ProRAW")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(.black.opacity(0.45), in: Capsule())
+                    .overlay(
+                        Capsule()
+                            .stroke(.white.opacity(0.35), lineWidth: 1)
+                    )
+                    .padding(10)
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            if let focusIndicatorPoint {
+                focusIndicator
+                    .position(x: focusIndicatorPoint.x, y: focusIndicatorPoint.y)
+            }
+        }
         .clipped()
+    }
+
+    private var focusIndicator: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .stroke(cinemaAmber, lineWidth: 2)
+                .frame(width: 72, height: 72)
+
+            Circle()
+                .stroke(cinemaAmber.opacity(0.95), lineWidth: 2)
+                .frame(width: 8, height: 8)
+        }
+        .scaleEffect(focusIndicatorScale)
+        .opacity(focusIndicatorOpacity)
+        .allowsHitTesting(false)
+    }
+
+    private func showFocusIndicator(at point: CGPoint) {
+        focusIndicatorHideWorkItem?.cancel()
+        focusIndicatorPoint = point
+        focusIndicatorScale = 1.2
+        focusIndicatorOpacity = 1.0
+
+        withAnimation(.easeOut(duration: 0.16)) {
+            focusIndicatorScale = 1.0
+        }
+
+        let hideWork = DispatchWorkItem {
+            withAnimation(.easeIn(duration: 0.2)) {
+                focusIndicatorOpacity = 0.0
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+                if focusIndicatorOpacity <= 0.01 {
+                    focusIndicatorPoint = nil
+                }
+            }
+        }
+
+        focusIndicatorHideWorkItem = hideWork
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9, execute: hideWork)
     }
     
     private var cropDragGesture: some Gesture {

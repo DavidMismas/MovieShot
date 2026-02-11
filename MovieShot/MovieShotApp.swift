@@ -1,20 +1,15 @@
-//
-//  MovieShotApp.swift
-//  MovieShot
-//
-//  Created by David Mišmaš on 8. 2. 26.
-//
-
 import SwiftUI
 import UIKit
 
 @main
 struct MovieShotApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @StateObject private var store = StoreService()
 
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environmentObject(store)
         }
     }
 }

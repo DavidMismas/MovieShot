@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ExportControls: View {
     @ObservedObject var viewModel: EditorViewModel
+    @Environment(\.openURL) private var openURL
     
     private let cinemaAmber = Color(red: 0.96, green: 0.69, blue: 0.27)
     private let panelBackground = Color.black.opacity(0.28)
@@ -25,6 +26,15 @@ struct ExportControls: View {
             }
             .buttonStyle(.bordered)
             .disabled(viewModel.editedImage == nil)
+
+            Button {
+                guard let photosURL = URL(string: "photos-redirect://") else { return }
+                openURL(photosURL)
+            } label: {
+                Label("Open Gallery", systemImage: "photo.on.rectangle")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
         }
         .padding(12)
         .background(
