@@ -1110,27 +1110,79 @@ final class EditorViewModel: ObservableObject {
         let extent = image.extent.integral
         guard extent.width > 0, extent.height > 0 else { return image }
 
-        let soft = min(max(softness, 0.0), 1.0)
-        let minDimension = min(extent.width, extent.height)
-        // radius0 = inner edge of the transition (stays bright). Higher softness = larger
-        // bright centre so the fade starts further out — giving a gentler, wider falloff.
-        // Kept well below radius1 so the gradient never inverts into a visible circle.
-        let radius0 = minDimension * (0.20 + 0.30 * soft)
-        let radius1 = minDimension * (0.75 + 0.22 * soft)
-        let edgeLuma = max(0.45, 1.0 - strength * 0.58)
+        let center = CIVector(x: extent.midX, y: extent.midY)
+        
+        // Define the vignette falloff
+        // radius0: start of falloff (inner)
+        // radius1: end of falloff (outer)
+        // We calculate these based on the *diagonal* or *max dimension* to ensure coverage,
+        // but since we will scale the gradient to match aspect ratio, we can treat it as a square first.
+        let radius0 = min(extent.width, extent.height) * (0.25 + 0.25 * softness)
+        let radius1 = min(extent.width, extent.height) * (0.85 + 0.15 * softness)
 
-        guard let mask = radialMask(
-            extent: extent,
-            radius0: radius0,
-            radius1: radius1,
-            innerLuma: 1.0,
-            outerLuma: edgeLuma
-        ) else {
-            return image
+        // Create a standard radial gradient (circular)
+        guard let radial = CIFilter(name: "CIRadialGradient") else { return image }
+        radial.setValue(center, forKey: "inputCenter")
+        radial.setValue(radius0, forKey: "inputRadius0")
+        radial.setValue(radius1, forKey: "inputRadius1")
+        // Inverted colors for a multiply mask: white (1.0) inside, darkened outside
+        // The outer luma depends on strength. 1.0 = no checking, 0.0 = black.
+        let outerLuma = max(0.0, 1.0 - strength)
+        
+        radial.setValue(CIColor(red: 1, green: 1, blue: 1, alpha: 1), forKey: "inputColor0")
+        radial.setValue(CIColor(red: outerLuma, green: outerLuma, blue: outerLuma, alpha: 1), forKey: "inputColor1")
+
+        guard var gradient = radial.outputImage else { return image }
+        
+        // --- Elliptical Transformation ---
+        // To make it elliptical, we scale the gradient mask.
+        // But simply scaling it will move the center.
+        // A better way is to generate the gradient at a normalized center, scale it, then translate.
+        // OR: Use the existing centered gradient and scale relative to the center.
+        
+        // Let's try a simpler approach: 
+        // 1. Generate gradient in a 1x1 normalized space? No, CI logic prefers pixel coords.
+        
+        // Current approach: Circular gradient at the correct center.
+        // We want to stretch it to match the image aspect ratio.
+        
+        // Simpler: Generate the gradient centered at (0,0). Scale it. Translate to real center.
+        // Actually, if we want the vignette to be oval:
+        
+        // Let's assume the gradient is circular matching the HEIGHT.
+        // If we scale X by `aspectRatio`, it becomes elliptical matching the width.
+        // But we must also adjust the center.
+        
+        // Simpler: Generate the gradient centered at (0,0). Scale it. Translate to real center.
+        guard let centeredRadial = CIFilter(name: "CIRadialGradient") else { return image }
+        centeredRadial.setValue(CIVector(x: 0, y: 0), forKey: "inputCenter")
+        // Use a base unit size, then scale
+        let baseR0 = CGFloat(100) * (0.25 + 0.25 * softness)
+        let baseR1 = CGFloat(100) * (0.85 + 0.15 * softness)
+        centeredRadial.setValue(baseR0, forKey: "inputRadius0")
+        centeredRadial.setValue(baseR1, forKey: "inputRadius1")
+        centeredRadial.setValue(CIColor(red: 1, green: 1, blue: 1, alpha: 1), forKey: "inputColor0")
+        centeredRadial.setValue(CIColor(red: outerLuma, green: outerLuma, blue: outerLuma, alpha: 1), forKey: "inputColor1")
+        
+        if let baseGradient = centeredRadial.outputImage {
+            // Determine scale to fill the image extent
+            // We defined base radius relative to 100.
+            // We want the "100" dimension to map to the image half-dimensions?
+            // Actually, let's map the base 100 to min(halfWidth, halfHeight) * scale?
+            // It's easier to just pick a scale factor.
+            
+            let scaleX = extent.width / 200.0 // Map -100..100 to -halfWidth..halfWidth
+            let scaleY = extent.height / 200.0
+            
+            let elliptical = baseGradient.transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
+            let placed = elliptical.transformed(by: CGAffineTransform(translationX: extent.midX, y: extent.midY))
+            
+            // Crop back to image
+            gradient = placed.cropped(to: extent)
         }
-
+        
         guard let multiply = CIFilter(name: "CIMultiplyCompositing") else { return image }
-        multiply.setValue(mask, forKey: kCIInputImageKey)
+        multiply.setValue(gradient, forKey: kCIInputImageKey)
         multiply.setValue(image, forKey: kCIInputBackgroundImageKey)
         return multiply.outputImage?.cropped(to: extent) ?? image
     }
