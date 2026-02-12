@@ -1043,7 +1043,7 @@ final class EditorViewModel: ObservableObject {
             return FilmFinishSettings(
                 grainAmount: 0.10,
                 grainSize: 1.20,
-                vignetteStrength: 0.16,
+                vignetteStrength: 0.0,
                 vignetteSoftness: 0.88,
                 chromaticAberration: 0.6,
                 bloomIntensity: 0.14,
@@ -1084,7 +1084,7 @@ final class EditorViewModel: ObservableObject {
             return FilmFinishSettings(
                 grainAmount: 0.12,
                 grainSize: 1.15,
-                vignetteStrength: 0.13,
+                vignetteStrength: 0.0,
                 vignetteSoftness: 0.90,
                 chromaticAberration: 0.4,
                 bloomIntensity: 0.20,
@@ -1157,8 +1157,10 @@ final class EditorViewModel: ObservableObject {
         guard let centeredRadial = CIFilter(name: "CIRadialGradient") else { return image }
         centeredRadial.setValue(CIVector(x: 0, y: 0), forKey: "inputCenter")
         // Use a base unit size, then scale
-        let baseR0 = CGFloat(100) * (0.25 + 0.25 * softness)
-        let baseR1 = CGFloat(100) * (0.85 + 0.15 * softness)
+        // Softness should extend the falloff significantly.
+        // We let radius1 go beyond 100 (image edge) to create a very gentle ramp.
+        let baseR0 = CGFloat(100) * (0.3 + 0.1 * softness) 
+        let baseR1 = CGFloat(100) * (0.7 + 0.8 * softness) 
         centeredRadial.setValue(baseR0, forKey: "inputRadius0")
         centeredRadial.setValue(baseR1, forKey: "inputRadius1")
         centeredRadial.setValue(CIColor(red: 1, green: 1, blue: 1, alpha: 1), forKey: "inputColor0")

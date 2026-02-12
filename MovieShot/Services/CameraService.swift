@@ -27,6 +27,7 @@ final class CameraService: NSObject, ObservableObject {
     }
 
     @Published private(set) var authorizationStatus: AVAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
+    @Published private(set) var activeVideoDevice: AVCaptureDevice?
     @Published private(set) var isSessionRunning = false
     @Published private(set) var availableLenses: [CameraLens] = []
     @Published private(set) var currentPosition: AVCaptureDevice.Position = .back
@@ -383,6 +384,7 @@ final class CameraService: NSObject, ObservableObject {
             setupCaptureRotationCoordinator(for: device)
 
             DispatchQueue.main.async {
+                self.activeVideoDevice = device
                 self.deviceChangeCount += 1
             }
         } catch {

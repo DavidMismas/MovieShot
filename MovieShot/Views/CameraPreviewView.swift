@@ -4,24 +4,22 @@ import UIKit
 
 struct CameraPreviewView: UIViewRepresentable {
     let session: AVCaptureSession
-    /// Observed so SwiftUI calls updateUIView when the camera device changes.
-    let deviceChangeCount: Int
+    let activeDevice: AVCaptureDevice?
     var onTapToFocus: ((CGPoint, CGPoint) -> Void)?
 
     func makeUIView(context: Context) -> PreviewView {
         let view = PreviewView()
         view.videoPreviewLayer.videoGravity = .resizeAspectFill
         view.videoPreviewLayer.session = session
-        view.updateDeviceChangeCount(deviceChangeCount)
+        view.updateActiveDevice(activeDevice)
         view.onTapToFocus = onTapToFocus
         return view
     }
 
     func updateUIView(_ uiView: PreviewView, context: Context) {
         uiView.videoPreviewLayer.session = session
-        uiView.updateDeviceChangeCount(deviceChangeCount)
+        uiView.updateActiveDevice(activeDevice)
         uiView.onTapToFocus = onTapToFocus
-        uiView.setupRotationIfReady()
     }
 }
 
@@ -29,8 +27,7 @@ final class PreviewView: UIView {
     private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
     private var previewRotationObservation: NSKeyValueObservation?
     private var sessionObservation: NSObjectProtocol?
-    private var trackedDeviceID: String?
-    private var lastDeviceChangeCount = -1
+    private var activeDevice: AVCaptureDevice?
     var onTapToFocus: ((CGPoint, CGPoint) -> Void)?
 
     override init(frame: CGRect) {
@@ -43,10 +40,9 @@ final class PreviewView: UIView {
         setupTapGesture()
     }
 
-    func updateDeviceChangeCount(_ value: Int) {
-        guard value != lastDeviceChangeCount else { return }
-        lastDeviceChangeCount = value
-        trackedDeviceID = nil
+    func updateActiveDevice(_ device: AVCaptureDevice?) {
+        guard device != activeDevice else { return }
+        activeDevice = device
         setupRotationIfReady()
     }
 
@@ -88,13 +84,15 @@ final class PreviewView: UIView {
     }
 
     func setupRotationIfReady() {
-        guard let session = videoPreviewLayer.session else { return }
-        guard let device = currentVideoDevice(in: session) else { return }
+        guard let device = activeDevice else { return }
         guard videoPreviewLayer.connection != nil else { return }
-        guard trackedDeviceID != device.uniqueID || rotationCoordinator == nil else { return }
+        
+        // If we already have a coordinator for this device, do nothing
+        if let coordinator = rotationCoordinator, coordinator.device == device {
+            return
+        }
 
-        teardownRotation(clearDeviceID: false)
-        trackedDeviceID = device.uniqueID
+        teardownRotation()
 
         let coordinator = AVCaptureDevice.RotationCoordinator(
             device: device,
@@ -120,20 +118,10 @@ final class PreviewView: UIView {
         connection.videoRotationAngle = angle
     }
 
-    private func currentVideoDevice(in session: AVCaptureSession) -> AVCaptureDevice? {
-        session.inputs
-            .compactMap { $0 as? AVCaptureDeviceInput }
-            .first(where: { $0.device.hasMediaType(.video) })?
-            .device
-    }
-
-    private func teardownRotation(clearDeviceID: Bool = true) {
+    private func teardownRotation() {
         previewRotationObservation?.invalidate()
         previewRotationObservation = nil
         rotationCoordinator = nil
-        if clearDeviceID {
-            trackedDeviceID = nil
-        }
     }
 
     private func setupTapGesture() {

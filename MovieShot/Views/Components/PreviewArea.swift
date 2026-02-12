@@ -48,7 +48,7 @@ struct PreviewArea: View {
         ZStack {
             CameraPreviewView(
                 session: viewModel.cameraService.session,
-                deviceChangeCount: viewModel.cameraService.deviceChangeCount,
+                activeDevice: viewModel.cameraService.activeVideoDevice,
                 onTapToFocus: { layerPoint, devicePoint in
                     viewModel.cameraService.focusAndExpose(at: devicePoint)
                     showFocusIndicator(at: layerPoint)
