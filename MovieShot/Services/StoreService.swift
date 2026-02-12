@@ -7,8 +7,7 @@ import SwiftUI
 /// Bypass options (for testing):
 ///   DEBUG builds    — Pro is always unlocked by default.
 ///                     Set env var `CineShoot_ProUnlocked=0` in the scheme to test the free/paywall flow.
-///   TestFlight      — Pro is always unlocked automatically (sandboxReceipt detection).
-///                     No action needed — just install via TestFlight and all presets are available.
+///   TestFlight      — Pro is always unlocked automatically via AppTransaction.shared sandbox check.
 ///   App Store       — Normal StoreKit flow; purchase required.
 @MainActor
 final class StoreService: ObservableObject {
@@ -39,12 +38,15 @@ final class StoreService: ObservableObject {
         }
         #endif
 
+        // Start the listener and product/entitlement check together.
+        // TestFlight detection happens inside the Task via AppTransaction.shared,
+        // which is the correct StoreKit 2 API. The listener is started first so no
+        // transactions are missed while the async check runs.
         transactionListenerTask = listenForTransactions()
 
         Task { [weak self] in
             #if !DEBUG
-            // TestFlight uses the StoreKit sandbox environment.
-            if await Self.isSandboxStoreEnvironment() {
+            if await Self.isTestFlightEnvironment() {
                 self?.isPro = true
                 return
             }
@@ -54,13 +56,12 @@ final class StoreService: ObservableObject {
         }
     }
 
-    /// Returns `true` in StoreKit sandbox environments (for example TestFlight).
-    nonisolated private static func isSandboxStoreEnvironment() async -> Bool {
+    /// Returns `true` when running in the StoreKit sandbox (TestFlight).
+    /// Uses AppTransaction.shared — the correct StoreKit 2 API for environment detection.
+    nonisolated private static func isTestFlightEnvironment() async -> Bool {
         guard let result = try? await AppTransaction.shared else { return false }
-        if case .verified(let transaction) = result {
-            return transaction.environment == .sandbox
-        }
-        return false
+        guard case .verified(let tx) = result else { return false }
+        return tx.environment == .xcode ? false : tx.environment == .sandbox
     }
 
     deinit {

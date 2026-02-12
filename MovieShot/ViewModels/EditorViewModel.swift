@@ -1112,8 +1112,11 @@ final class EditorViewModel: ObservableObject {
 
         let soft = min(max(softness, 0.0), 1.0)
         let minDimension = min(extent.width, extent.height)
-        let radius0 = minDimension * (0.35 + 0.22 * soft)
-        let radius1 = minDimension * 0.96
+        // radius0 = inner edge of the transition (stays bright). Higher softness = larger
+        // bright centre so the fade starts further out — giving a gentler, wider falloff.
+        // Kept well below radius1 so the gradient never inverts into a visible circle.
+        let radius0 = minDimension * (0.20 + 0.30 * soft)
+        let radius1 = minDimension * (0.75 + 0.22 * soft)
         let edgeLuma = max(0.45, 1.0 - strength * 0.58)
 
         guard let mask = radialMask(
