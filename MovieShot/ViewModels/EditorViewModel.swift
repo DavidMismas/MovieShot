@@ -1194,18 +1194,31 @@ final class EditorViewModel: ObservableObject {
 
         let extent = image.extent.integral
         guard extent.width > 0, extent.height > 0 else { return image }
-
-        let minDimension = min(extent.width, extent.height)
-        let shiftScale = max(1.0, minDimension / 1600.0)
-        let shift = amount * shiftScale
-        let verticalShift = shift * 0.25
+        
+        // True optical CA: Radial scaling from the center.
+        let center = CGPoint(x: extent.midX, y: extent.midY)
+        
+        // Scale Red UP and Blue DOWN relative to center.
+        // Factor 0.0015 * amount gives ~2.2px shift at edge of 3000px image for amount=1.0
+        let scaleFactor = 0.0015 * amount 
+        let redScale = 1.0 + scaleFactor
+        let blueScale = 1.0 - scaleFactor
+        
+        func radialTransform(scale: CGFloat) -> CGAffineTransform {
+            var t = CGAffineTransform(translationX: -center.x, y: -center.y)
+            t = t.scaledBy(x: scale, y: scale)
+            t = t.translatedBy(x: center.x, y: center.y)
+            return t
+        }
 
         let clamped = image.clampedToExtent()
+        
         let redSource = clamped
-            .transformed(by: .init(translationX: shift, y: verticalShift))
+            .transformed(by: radialTransform(scale: redScale))
             .cropped(to: extent)
+            
         let blueSource = clamped
-            .transformed(by: .init(translationX: -shift, y: -verticalShift))
+            .transformed(by: radialTransform(scale: blueScale))
             .cropped(to: extent)
 
         let redChannel = isolateChannel(redSource, red: 1, green: 0, blue: 0)
@@ -1214,26 +1227,8 @@ final class EditorViewModel: ObservableObject {
 
         let rg = additionComposite(redChannel, over: greenChannel)
         let rgb = additionComposite(blueChannel, over: rg).cropped(to: extent)
-
-        let spread = min(max(amount / 1.2, 0.0), 1.0)
-        let maskRadius0 = minDimension * (0.56 - 0.14 * spread)
-        let maskRadius1 = minDimension * (0.92 - 0.04 * spread)
-
-        guard let edgeMask = radialMask(
-            extent: extent,
-            radius0: maskRadius0,
-            radius1: maskRadius1,
-            innerLuma: 0.0,
-            outerLuma: 1.0
-        ) else {
-            return rgb
-        }
-
-        guard let blend = CIFilter(name: "CIBlendWithMask") else { return rgb }
-        blend.setValue(rgb, forKey: kCIInputImageKey)
-        blend.setValue(image, forKey: kCIInputBackgroundImageKey)
-        blend.setValue(edgeMask, forKey: kCIInputMaskImageKey)
-        return blend.outputImage?.cropped(to: extent) ?? rgb
+        
+        return rgb
     }
 
     nonisolated private static func applyFilmGrain(to image: CIImage, amount: CGFloat, size: CGFloat) -> CIImage {
