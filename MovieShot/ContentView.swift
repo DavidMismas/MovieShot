@@ -246,6 +246,17 @@ struct ContentView: View {
 
             Spacer()
 
+            if viewModel.step == .preset || viewModel.step == .adjust || viewModel.step == .crop {
+                Button {
+                    viewModel.restart()
+                } label: {
+                    Image(systemName: "camera.fill")
+                }
+                .buttonStyle(.bordered)
+            }
+
+            Spacer()
+
             if viewModel.step == .final {
                 Button {
                     viewModel.restart()

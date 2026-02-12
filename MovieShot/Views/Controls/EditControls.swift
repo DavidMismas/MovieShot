@@ -166,6 +166,11 @@ struct EditControls: View {
         case .madMax: return "flame.fill"
         case .revenant: return "snowflake"
         case .inTheMoodForLove: return "heart.fill"
+        case .seven: return "cloud.rain.fill"
+        case .vertigo: return "eye.fill"
+        case .orderOfPhoenix: return "wand.and.stars"
+        case .hero: return "seal.fill"
+        case .laLaLand: return "music.note"
         }
     }
 }

@@ -33,7 +33,7 @@ struct PurchaseView: View {
                             .font(.title.bold())
                             .foregroundStyle(.white)
 
-                        Text("Unlock all 8 cinematic presets")
+                        Text("Unlock all 13 cinematic presets")
                             .font(.subheadline)
                             .foregroundStyle(.white.opacity(0.65))
                     }
@@ -180,6 +180,11 @@ struct PurchaseView: View {
         case .madMax: return "flame.fill"
         case .revenant: return "snowflake"
         case .inTheMoodForLove: return "heart.fill"
+        case .seven: return "cloud.rain.fill"
+        case .vertigo: return "eye.fill"
+        case .orderOfPhoenix: return "wand.and.stars"
+        case .hero: return "seal.fill"
+        case .laLaLand: return "music.note"
         }
     }
 }

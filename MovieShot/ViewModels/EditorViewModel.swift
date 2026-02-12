@@ -735,6 +735,217 @@ final class EditorViewModel: ObservableObject {
             shadowHighlight.shadowAmount = 0.04
             shadowHighlight.highlightAmount = 0.90
             return shadowHighlight.outputImage ?? output
+
+        case .seven:
+            // Se7en (1995) — Darius Khondji's CCE bleach-bypass look:
+            // desaturated cyan-tinted shadows, crushed blacks, high micro-contrast,
+            // narrow highlight range, gritty "Dark Clarity" aesthetic.
+            // Pushed+flashed stock + bleach bypass = saturation pulled back, contrast up,
+            // pervasive sickly cyan undercast in shadows and mids.
+            let matrix = CIFilter.colorMatrix()
+            matrix.inputImage = image
+            // Red channel: suppressed — contributes to the desaturated, anemic look
+            matrix.rVector = CIVector(x: 0.82, y: 0.06, z: 0.06, w: 0.0)
+            // Green channel: slight boost, cross-bleed into blue for cyan quality
+            matrix.gVector = CIVector(x: 0.04, y: 0.96, z: 0.08, w: 0.0)
+            // Blue channel: prominent — creates the pervasive cyan shadow cast
+            matrix.bVector = CIVector(x: 0.00, y: 0.14, z: 1.04, w: 0.0)
+            matrix.aVector = CIVector(x: 0.0, y: 0.0, z: 0.0, w: 1.0)
+            // Cyan/blue lift in shadows (the "rot and decay" undercast)
+            matrix.biasVector = CIVector(x: -0.008, y: 0.004, z: 0.018, w: 0.0)
+            var output = matrix.outputImage ?? image
+
+            // Bleach bypass: strong desaturation, high contrast (narrow dynamic range)
+            let controls = CIFilter.colorControls()
+            controls.inputImage = output
+            controls.saturation = 0.58
+            controls.contrast = 1.38
+            controls.brightness = -0.03
+            output = controls.outputImage ?? output
+
+            // Cool temperature shift — the city is wet, cold, grey
+            let temperature = CIFilter.temperatureAndTint()
+            temperature.inputImage = output
+            temperature.neutral = CIVector(x: 6500, y: 0)
+            temperature.targetNeutral = CIVector(x: 5000, y: -18)
+            output = temperature.outputImage ?? output
+
+            // Crush shadows hard (CCE process), soft highlight rolloff (flashing effect)
+            let shadowHighlight = CIFilter.highlightShadowAdjust()
+            shadowHighlight.inputImage = output
+            shadowHighlight.shadowAmount = -0.45
+            shadowHighlight.highlightAmount = 0.78
+            return shadowHighlight.outputImage ?? output
+
+        case .vertigo:
+            // Vertigo (1958) — Robert Burks, Technicolor dye-transfer:
+            // Rich saturated reds (obsession, death) and deep mysterious greens (Madeleine),
+            // dreamlike fog-filtered warmth, chiaroscuro contrast, golden-era Hollywood palette.
+            let matrix = CIFilter.colorMatrix()
+            matrix.inputImage = image
+            // Boost red for the fatalistic reds (robes, restaurant backdrop, staircase)
+            matrix.rVector = CIVector(x: 1.14, y: 0.06, z: 0.00, w: 0.0)
+            // Enrich greens (Madeleine's mysterious green — mystery and deception)
+            matrix.gVector = CIVector(x: 0.04, y: 1.08, z: 0.02, w: 0.0)
+            // Suppress blue slightly for the warm Technicolor period look
+            matrix.bVector = CIVector(x: 0.00, y: 0.08, z: 0.72, w: 0.0)
+            matrix.aVector = CIVector(x: 0.0, y: 0.0, z: 0.0, w: 1.0)
+            // Warm golden lift — Technicolor prints had a beautiful warmth in mids
+            matrix.biasVector = CIVector(x: 0.018, y: 0.010, z: -0.006, w: 0.0)
+            var output = matrix.outputImage ?? image
+
+            // Vivid but not over-saturated — Technicolor was rich, not garish
+            let controls = CIFilter.colorControls()
+            controls.inputImage = output
+            controls.saturation = 1.18
+            controls.contrast = 1.14
+            controls.brightness = 0.01
+            output = controls.outputImage ?? output
+
+            // Slightly warm — Technicolor had a golden warmth, fog-filtered on location
+            let temperature = CIFilter.temperatureAndTint()
+            temperature.inputImage = output
+            temperature.neutral = CIVector(x: 6500, y: 0)
+            temperature.targetNeutral = CIVector(x: 5600, y: 12)
+            output = temperature.outputImage ?? output
+
+            // Hold shadow detail (chiaroscuro: meaningful shadow) with soft highlights
+            let shadowHighlight = CIFilter.highlightShadowAdjust()
+            shadowHighlight.inputImage = output
+            shadowHighlight.shadowAmount = 0.06
+            shadowHighlight.highlightAmount = 0.86
+            return shadowHighlight.outputImage ?? output
+
+        case .orderOfPhoenix:
+            // Harry Potter – Order of the Phoenix (2007) — David Yates / Slawomir Idziak:
+            // Heavy blue-teal grade (fan editors describe it as "blue cast bleeds over everything"),
+            // dark crushed shadows, desaturated mids — Umbridge's pink becomes lavender.
+            // "A dimmer heading downward" — growing threat of Voldemort visualised as blue-green.
+            let matrix = CIFilter.colorMatrix()
+            matrix.inputImage = image
+            // Red suppressed — warms and pinks lose their punch, become muted
+            matrix.rVector = CIVector(x: 0.84, y: 0.06, z: 0.04, w: 0.0)
+            // Green slight boost into the teal direction
+            matrix.gVector = CIVector(x: 0.03, y: 0.94, z: 0.08, w: 0.0)
+            // Blue strongly dominant — the heavy blue cast that defines this film
+            matrix.bVector = CIVector(x: 0.00, y: 0.18, z: 1.06, w: 0.0)
+            matrix.aVector = CIVector(x: 0.0, y: 0.0, z: 0.0, w: 1.0)
+            // Cold blue shadow lift
+            matrix.biasVector = CIVector(x: -0.010, y: 0.002, z: 0.022, w: 0.0)
+            var output = matrix.outputImage ?? image
+
+            // Dark and desaturated — muted, oppressive atmosphere
+            let controls = CIFilter.colorControls()
+            controls.inputImage = output
+            controls.saturation = 0.72
+            controls.contrast = 1.22
+            controls.brightness = -0.03
+            output = controls.outputImage ?? output
+
+            // Very cool temperature — the Ministry of Magic corridors are ice-cold
+            let temperature = CIFilter.temperatureAndTint()
+            temperature.inputImage = output
+            temperature.neutral = CIVector(x: 6500, y: 0)
+            temperature.targetNeutral = CIVector(x: 4800, y: -14)
+            output = temperature.outputImage ?? output
+
+            // Dark overall — roughly half stop under, adds to oppressive feel
+            let exposureFilter = CIFilter.exposureAdjust()
+            exposureFilter.inputImage = output
+            exposureFilter.ev = -0.35
+            output = exposureFilter.outputImage ?? output
+
+            // Crushed blacks, restrained highlights
+            let shadowHighlight = CIFilter.highlightShadowAdjust()
+            shadowHighlight.inputImage = output
+            shadowHighlight.shadowAmount = -0.35
+            shadowHighlight.highlightAmount = 0.88
+            return shadowHighlight.outputImage ?? output
+
+        case .hero:
+            // Hero (2002) — Zhang Yimou / Christopher Doyle:
+            // The film is structured around bold saturated color chapters (red, blue, white, green).
+            // This preset channels the dominant red chapter — Zhang hand-graded every leaf —
+            // with the underlying saturated primaries and epic high-contrast quality.
+            // Deeply saturated, rich crimson/red warmth, dramatic contrast, bold color separation.
+            let matrix = CIFilter.colorMatrix()
+            matrix.inputImage = image
+            // Powerful red boost — the signature of the red chapter, blood crimson to fiery scarlet
+            matrix.rVector = CIVector(x: 1.22, y: 0.06, z: 0.00, w: 0.0)
+            // Rich green maintained — the green flashback chapter's jade quality bleeds in
+            matrix.gVector = CIVector(x: 0.04, y: 1.02, z: 0.02, w: 0.0)
+            // Blue pulled back slightly — keeps reds warm, prevents purple cast
+            matrix.bVector = CIVector(x: 0.00, y: 0.08, z: 0.78, w: 0.0)
+            matrix.aVector = CIVector(x: 0.0, y: 0.0, z: 0.0, w: 1.0)
+            // Warm red-orange lift — the fiery crimson autumn leaves
+            matrix.biasVector = CIVector(x: 0.022, y: 0.004, z: -0.014, w: 0.0)
+            var output = matrix.outputImage ?? image
+
+            // Pushed to the saturation limit (as described by colorist Al Hansen)
+            // Bold primaries without losing detail — "reds with weight"
+            let controls = CIFilter.colorControls()
+            controls.inputImage = output
+            controls.saturation = 1.42
+            controls.contrast = 1.26
+            controls.brightness = -0.01
+            output = controls.outputImage ?? output
+
+            // Warm — the film's color temperature in the red chapter is fiery
+            let temperature = CIFilter.temperatureAndTint()
+            temperature.inputImage = output
+            temperature.neutral = CIVector(x: 6500, y: 0)
+            temperature.targetNeutral = CIVector(x: 5000, y: 10)
+            output = temperature.outputImage ?? output
+
+            // Anamorphic Cooke lens quality — hold shadows, wide latitude in highlights
+            let shadowHighlight = CIFilter.highlightShadowAdjust()
+            shadowHighlight.inputImage = output
+            shadowHighlight.shadowAmount = -0.10
+            shadowHighlight.highlightAmount = 0.88
+            return shadowHighlight.outputImage ?? output
+
+        case .laLaLand:
+            // La La Land (2016) — Linus Sandgren, ASC (Academy Award winner):
+            // Shot on 35mm with pull-processing (overexposed 1⅓ stops, underdeveloped).
+            // "A dream of Los Angeles rather than the real thing" — pastel blues, pinks, purples
+            // at magic hour. Soft elegant grain, immature blacks, fine tonal detail in highlights.
+            // Inspired by Technicolor classics and Jacques Demy's Umbrellas of Cherbourg.
+            let matrix = CIFilter.colorMatrix()
+            matrix.inputImage = image
+            // Soft warm reds — romantic, slightly desaturated (pull-processed film character)
+            matrix.rVector = CIVector(x: 1.06, y: 0.06, z: 0.02, w: 0.0)
+            // Balanced greens — doesn't compete with pinks/purples
+            matrix.gVector = CIVector(x: 0.04, y: 0.96, z: 0.06, w: 0.0)
+            // Slightly enhanced blue for the dreamy blue/purple magic hour quality
+            matrix.bVector = CIVector(x: 0.02, y: 0.10, z: 0.94, w: 0.0)
+            matrix.aVector = CIVector(x: 0.0, y: 0.0, z: 0.0, w: 1.0)
+            // Pastel lift — pull-processed film has lifted blacks ("immature blacks")
+            // warm pink bias + cool blue bias creates the pastel multicolor quality
+            matrix.biasVector = CIVector(x: 0.022, y: 0.014, z: 0.020, w: 0.0)
+            var output = matrix.outputImage ?? image
+
+            // Pull-processing: lower contrast, protected highlights, soft grain structure
+            // "clean, soft, elegant colourful image... a bit like Kodachrome, but less contrast"
+            let controls = CIFilter.colorControls()
+            controls.inputImage = output
+            controls.saturation = 1.08
+            controls.contrast = 1.02
+            controls.brightness = 0.02
+            output = controls.outputImage ?? output
+
+            // Magic hour warmth — mercury vapour blues mixed with warm practical lamps
+            let temperature = CIFilter.temperatureAndTint()
+            temperature.inputImage = output
+            temperature.neutral = CIVector(x: 6500, y: 0)
+            temperature.targetNeutral = CIVector(x: 5800, y: 14)
+            output = temperature.outputImage ?? output
+
+            // Protected highlights (pull process detail), lifted shadows (pastel / dream quality)
+            let shadowHighlight = CIFilter.highlightShadowAdjust()
+            shadowHighlight.inputImage = output
+            shadowHighlight.shadowAmount = 0.12
+            shadowHighlight.highlightAmount = 0.80
+            return shadowHighlight.outputImage ?? output
         }
     }
 
@@ -811,6 +1022,73 @@ final class EditorViewModel: ObservableObject {
                 chromaticAberration: 0.0,
                 bloomIntensity: 0.24,
                 bloomRadius: 11.0
+            )
+        case .seven:
+            // Heavy photochemical grain (pushed 1 stop + CCE process),
+            // strong vignette (practical lighting sources, dark corners),
+            // chromatic aberration (vintage glass, atmospheric city haze),
+            // no bloom — this film is all darkness and grit
+            return FilmFinishSettings(
+                grainAmount: 0.22,
+                grainSize: 1.80,
+                vignetteStrength: 0.32,
+                vignetteSoftness: 0.58,
+                chromaticAberration: 1.4,
+                bloomIntensity: 0.0,
+                bloomRadius: 0.0
+            )
+        case .vertigo:
+            // Fine Technicolor grain structure, dreamy soft vignette (fog filters on location),
+            // subtle chromatic aberration (period glass lenses), soft bloom for the dreamlike quality
+            return FilmFinishSettings(
+                grainAmount: 0.10,
+                grainSize: 1.20,
+                vignetteStrength: 0.16,
+                vignetteSoftness: 0.88,
+                chromaticAberration: 0.6,
+                bloomIntensity: 0.14,
+                bloomRadius: 9.0
+            )
+        case .orderOfPhoenix:
+            // Moderate grain (ARRI cameras, digital but moody),
+            // deep vignette (dark cramped frames),
+            // slight CA (theatrical handheld tension lenses), no bloom
+            return FilmFinishSettings(
+                grainAmount: 0.09,
+                grainSize: 1.10,
+                vignetteStrength: 0.26,
+                vignetteSoftness: 0.64,
+                chromaticAberration: 0.5,
+                bloomIntensity: 0.0,
+                bloomRadius: 0.0
+            )
+        case .hero:
+            // Minimal grain — crisp Arri 535 anamorphic, clean image,
+            // very slight vignette (anamorphic lens fall-off at edges),
+            // no CA — the primary colors are meant to be pure and vivid,
+            // subtle bloom on highlights (the silk-and-fire aesthetics)
+            return FilmFinishSettings(
+                grainAmount: 0.03,
+                grainSize: 0.90,
+                vignetteStrength: 0.10,
+                vignetteSoftness: 0.84,
+                chromaticAberration: 0.0,
+                bloomIntensity: 0.16,
+                bloomRadius: 7.0
+            )
+        case .laLaLand:
+            // Fine elegant grain (35mm pull-processed — "fine grain structures"),
+            // soft gentle vignette (anamorphic 2.55:1 edges, theatrical),
+            // subtle CA (Panavision anamorphic modified lenses),
+            // warm soft bloom (the luminous Sandgren look, hidden lights behind trees)
+            return FilmFinishSettings(
+                grainAmount: 0.12,
+                grainSize: 1.15,
+                vignetteStrength: 0.13,
+                vignetteSoftness: 0.90,
+                chromaticAberration: 0.4,
+                bloomIntensity: 0.20,
+                bloomRadius: 12.0
             )
         default:
             return nil

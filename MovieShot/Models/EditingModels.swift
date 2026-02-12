@@ -61,6 +61,11 @@ enum MoviePreset: String, CaseIterable, Identifiable {
     case madMax
     case revenant
     case inTheMoodForLove
+    case seven
+    case vertigo
+    case orderOfPhoenix
+    case hero
+    case laLaLand
 
     var id: String { rawValue }
 
@@ -76,6 +81,11 @@ enum MoviePreset: String, CaseIterable, Identifiable {
         case .madMax: return "Fury Heat"
         case .revenant: return "Risen One"
         case .inTheMoodForLove: return "Mood for Love"
+        case .seven: return "Seven Sins"
+        case .vertigo: return "Spiral"
+        case .orderOfPhoenix: return "Dark Order"
+        case .hero: return "Ying Xiong"
+        case .laLaLand: return "La La"
         }
     }
 
@@ -99,6 +109,11 @@ enum MoviePreset: String, CaseIterable, Identifiable {
         case .madMax: return "Aggressive orange-teal, gritty contrast, heat"
         case .revenant: return "Cold desaturated earth, natural dramatic tone"
         case .inTheMoodForLove: return "Rich tungsten reds, jade greens, soft glow"
+        case .seven: return "Bleach bypass grit, cyan shadows, heavy grain"
+        case .vertigo: return "Rich Technicolor reds, mysterious greens, dreamy fog"
+        case .orderOfPhoenix: return "Heavy blue-teal cast, crushed shadows, dark desaturated"
+        case .hero: return "Vivid saturated primaries, epic color contrast"
+        case .laLaLand: return "Pastel dreamscape, warm magic hour, soft grain"
         }
     }
 }
