@@ -5,9 +5,9 @@ import SwiftUI
 /// Manages the one-time Pro upgrade purchase using StoreKit 2.
 ///
 /// Bypass options (for testing):
-///   DEBUG builds    — Pro is always unlocked by default.
-///                     Set env var `CineShoot_ProUnlocked=0` in the scheme to test the free/paywall flow.
-///   TestFlight      — Pro is always unlocked automatically via AppTransaction.shared sandbox check.
+///   DEBUG builds    — Normal StoreKit flow by default.
+///                     Set env var `CineShoot_ProUnlocked=1` in the scheme to force-unlock Pro.
+///   TestFlight      — Normal StoreKit flow; purchase is testable in sandbox.
 ///   App Store       — Normal StoreKit flow; purchase required.
 @MainActor
 final class StoreService: ObservableObject {
@@ -28,40 +28,22 @@ final class StoreService: ObservableObject {
 
     init() {
         #if DEBUG
-        // DEBUG: unlock by default; opt-out with env var CineShoot_ProUnlocked=0 to test the free flow.
+        // DEBUG: keep normal flow by default; opt-in unlock with env var CineShoot_ProUnlocked=1.
         let debugOverride = ProcessInfo.processInfo.environment["CineShoot_ProUnlocked"]
-        if debugOverride == "0" {
-            // fall through to normal StoreKit flow
-        } else {
+        if debugOverride == "1" {
             isPro = true
             return
         }
         #endif
 
         // Start the listener and product/entitlement check together.
-        // TestFlight detection happens inside the Task via AppTransaction.shared,
-        // which is the correct StoreKit 2 API. The listener is started first so no
-        // transactions are missed while the async check runs.
+        // The listener is started first so no transactions are missed while the async check runs.
         transactionListenerTask = listenForTransactions()
 
         Task { [weak self] in
-            #if !DEBUG
-            if await Self.isTestFlightEnvironment() {
-                self?.isPro = true
-                return
-            }
-            #endif
             await self?.loadProduct()
             await self?.refreshPurchaseStatus()
         }
-    }
-
-    /// Returns `true` when running in the StoreKit sandbox (TestFlight).
-    /// Uses AppTransaction.shared — the correct StoreKit 2 API for environment detection.
-    nonisolated private static func isTestFlightEnvironment() async -> Bool {
-        guard let result = try? await AppTransaction.shared else { return false }
-        guard case .verified(let tx) = result else { return false }
-        return tx.environment == .xcode ? false : tx.environment == .sandbox
     }
 
     deinit {

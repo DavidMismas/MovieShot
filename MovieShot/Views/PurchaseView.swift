@@ -33,7 +33,7 @@ struct PurchaseView: View {
                             .font(.title.bold())
                             .foregroundStyle(.white)
 
-                        Text("Unlock all 13 cinematic presets")
+                        Text("Unlock all \(proPresets.count) cinematic presets")
                             .font(.subheadline)
                             .foregroundStyle(.white.opacity(0.65))
                     }

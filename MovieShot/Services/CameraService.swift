@@ -328,6 +328,18 @@ final class CameraService: NSObject, ObservableObject {
             ))
         }
 
+        // Digital crop lens on the Telephoto camera
+        if position == .back, uniqueDevices.contains(where: { $0.deviceType == .builtInTelephotoCamera }) {
+            lenses.append(CameraLens(
+                id: "\(position.rawValue)-tele-2x",
+                name: "2x Tele",
+                deviceType: .builtInTelephotoCamera,
+                position: position,
+                zoomFactor: 2.0,
+                sortOrder: 25
+            ))
+        }
+
         return lenses.sorted { $0.sortOrder < $1.sortOrder }
     }
 
