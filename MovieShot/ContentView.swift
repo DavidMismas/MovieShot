@@ -126,6 +126,10 @@ struct ContentView: View {
             if !viewModel.showPresetLoading {
                 VStack(spacing: 10) {
                     stepControls
+
+                    if viewModel.step == .preset {
+                        quickSaveButton
+                    }
                     
                     if viewModel.step != .source {
                         stepActions
@@ -236,39 +240,32 @@ struct ContentView: View {
     }
 
     private var stepActions: some View {
-        HStack {
-            if viewModel.step != .source {
-                Button("Back") {
-                    viewModel.previousStep()
+        ZStack {
+            HStack {
+                if viewModel.step != .source {
+                    Button("Back") {
+                        viewModel.previousStep()
+                    }
+                    .buttonStyle(.bordered)
                 }
-                .buttonStyle(.bordered)
+
+                Spacer()
+
+                if viewModel.step != .source && viewModel.step != .final {
+                    Button("Continue") {
+                        viewModel.continueStep()
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
             }
 
-            Spacer()
-
-            if viewModel.step == .preset || viewModel.step == .adjust || viewModel.step == .crop {
+            if viewModel.step == .preset || viewModel.step == .adjust || viewModel.step == .crop || viewModel.step == .final {
                 Button {
                     viewModel.restart()
                 } label: {
                     Image(systemName: "camera.fill")
                 }
                 .buttonStyle(.bordered)
-            }
-
-            Spacer()
-
-            if viewModel.step == .final {
-                Button {
-                    viewModel.restart()
-                } label: {
-                    Image(systemName: "camera.fill")
-                }
-                .buttonStyle(.bordered)
-            } else if viewModel.step != .source {
-                Button("Continue") {
-                    viewModel.continueStep()
-                }
-                .buttonStyle(.borderedProminent)
             }
         }
         .padding(12)
@@ -280,6 +277,17 @@ struct ContentView: View {
                         .stroke(.white.opacity(0.15), lineWidth: 1)
                 )
         )
+    }
+
+    private var quickSaveButton: some View {
+        Button {
+            viewModel.saveToLibrary()
+        } label: {
+            Label("Save now", systemImage: "square.and.arrow.down")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
+        .disabled(viewModel.editedImage == nil)
     }
 }
 
