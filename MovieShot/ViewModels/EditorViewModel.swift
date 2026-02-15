@@ -5,6 +5,7 @@ import Foundation
 import Photos
 import PhotosUI
 import SwiftUI
+import UniformTypeIdentifiers
 
 @MainActor
 final class EditorViewModel: ObservableObject {
@@ -167,7 +168,7 @@ final class EditorViewModel: ObservableObject {
         pickerItem = nil
     }
 
-    /// Renders the current edits at full resolution for export (JPEG output).
+    /// Renders the current edits at full resolution for export.
     /// Prefers RAW source for maximum quality.
     func renderFullResolution() -> UIImage? {
         let inputImage: CIImage
@@ -201,7 +202,9 @@ final class EditorViewModel: ObservableObject {
     // ... rest of class functions ...
 
     func saveToLibrary() {
-        guard let image = renderFullResolution() else { return }
+        guard let image = renderFullResolution(),
+              let exportResource = makeBestQualityJPEGResource(from: image)
+        else { return }
         statusMessage = nil
 
         PHPhotoLibrary.requestAuthorization(for: .addOnly) { [weak self] status in
@@ -215,7 +218,10 @@ final class EditorViewModel: ObservableObject {
             }
 
             PHPhotoLibrary.shared().performChanges {
-                PHAssetChangeRequest.creationRequestForAsset(from: image)
+                let request = PHAssetCreationRequest.forAsset()
+                let options = PHAssetResourceCreationOptions()
+                options.uniformTypeIdentifier = exportResource.uniformTypeIdentifier
+                request.addResource(with: .photo, data: exportResource.data, options: options)
             } completionHandler: { success, _ in
                 Task { @MainActor in
                     if success {
@@ -228,6 +234,14 @@ final class EditorViewModel: ObservableObject {
                 }
             }
         }
+    }
+
+    private func makeBestQualityJPEGResource(from image: UIImage) -> (data: Data, uniformTypeIdentifier: String)? {
+        if let jpegData = image.jpegData(compressionQuality: 1.0) {
+            return (data: jpegData, uniformTypeIdentifier: UTType.jpeg.identifier)
+        }
+
+        return nil
     }
 
     private func handleCameraCaptureResult(_ result: CameraCaptureResult) {

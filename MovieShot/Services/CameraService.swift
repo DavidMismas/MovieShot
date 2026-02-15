@@ -129,7 +129,8 @@ final class CameraService: NSObject, ObservableObject {
             if outputDimensions.width > 0 && outputDimensions.height > 0 {
                 settings.maxPhotoDimensions = outputDimensions
             }
-            settings.photoQualityPrioritization = .balanced
+            // Prioritize final still quality over capture speed.
+            settings.photoQualityPrioritization = .quality
             if #available(iOS 18.0, *),
                shouldSuppressShutterSound,
                self.photoOutput.isShutterSoundSuppressionSupported {
