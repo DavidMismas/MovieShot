@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsSheet: View {
     @ObservedObject var cameraService: CameraService
+    @ObservedObject var viewModel: EditorViewModel
     @EnvironmentObject var store: StoreService
     @Environment(\.dismiss) var dismiss
 
@@ -82,6 +83,30 @@ struct SettingsSheet: View {
 
                     Toggle("Use Apple ProRAW", isOn: $cameraService.appleProRAWEnabled)
                         .tint(cinemaAmber)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("JPEG Export Quality")
+                            Spacer()
+                            Text("\(viewModel.exportJPEGQualityPercent)%")
+                                .foregroundStyle(cinemaTeal)
+                                .monospacedDigit()
+                        }
+
+                        Slider(
+                            value: Binding(
+                                get: { Double(viewModel.exportJPEGQualityPercent) },
+                                set: { viewModel.exportJPEGQualityPercent = Int($0.rounded()) }
+                            ),
+                            in: 70...100,
+                            step: 5
+                        )
+                        .tint(cinemaAmber)
+
+                        Text("Higher quality = larger file size")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.65))
+                    }
 
                     if !cameraService.isShutterSoundToggleAvailable {
                         Text("Your device or region may still require shutter sound.")

@@ -75,7 +75,7 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $showSettings) {
-             SettingsSheet(cameraService: viewModel.cameraService)
+             SettingsSheet(cameraService: viewModel.cameraService, viewModel: viewModel)
                  .presentationDetents([.fraction(0.55)])
                  .presentationDragIndicator(.visible)
         }

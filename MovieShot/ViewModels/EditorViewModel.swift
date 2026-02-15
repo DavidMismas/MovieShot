@@ -9,6 +9,10 @@ import UniformTypeIdentifiers
 
 @MainActor
 final class EditorViewModel: ObservableObject {
+    private enum PreferenceKey {
+        static let exportJPEGQualityPercent = "editor.exportJPEGQualityPercent"
+    }
+
     @Published var step: EditorStep = .source {
         didSet {
             if step == .preset {
@@ -57,6 +61,16 @@ final class EditorViewModel: ObservableObject {
     @Published var showSaveConfirmation = false
     @Published var showShareSheet = false
     @Published var showPresetLoading = false
+    @Published var exportJPEGQualityPercent: Int = 95 {
+        didSet {
+            let normalized = Self.normalizedJPEGQualityPercent(exportJPEGQualityPercent)
+            if exportJPEGQualityPercent != normalized {
+                exportJPEGQualityPercent = normalized
+                return
+            }
+            UserDefaults.standard.set(normalized, forKey: PreferenceKey.exportJPEGQualityPercent)
+        }
+    }
 
     var cameraService = CameraService()
     /// CIContext is thread-safe and expensive to create — keep one instance for export rasterization.
@@ -82,6 +96,11 @@ final class EditorViewModel: ObservableObject {
     }
 
     init() {
+        let storedJPEGQuality = UserDefaults.standard.object(forKey: PreferenceKey.exportJPEGQualityPercent) as? Int ?? 95
+        let normalizedJPEGQuality = Self.normalizedJPEGQualityPercent(storedJPEGQuality)
+        exportJPEGQualityPercent = normalizedJPEGQuality
+        UserDefaults.standard.set(normalizedJPEGQuality, forKey: PreferenceKey.exportJPEGQualityPercent)
+
         cameraServiceChangeCancellable = cameraService.objectWillChange
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
@@ -237,11 +256,18 @@ final class EditorViewModel: ObservableObject {
     }
 
     private func makeBestQualityJPEGResource(from image: UIImage) -> (data: Data, uniformTypeIdentifier: String)? {
-        if let jpegData = image.jpegData(compressionQuality: 1.0) {
+        let compressionQuality = CGFloat(exportJPEGQualityPercent) / 100.0
+        if let jpegData = image.jpegData(compressionQuality: compressionQuality) {
             return (data: jpegData, uniformTypeIdentifier: UTType.jpeg.identifier)
         }
 
         return nil
+    }
+
+    private static func normalizedJPEGQualityPercent(_ value: Int) -> Int {
+        let clamped = min(max(value, 70), 100)
+        let stepped = Int((Double(clamped) / 5.0).rounded()) * 5
+        return min(max(stepped, 70), 100)
     }
 
     private func handleCameraCaptureResult(_ result: CameraCaptureResult) {
@@ -458,11 +484,11 @@ final class EditorViewModel: ObservableObject {
         switch preset {
         case .sinCity, .theBatman, .drive, .madMax, .seven, .orderOfPhoenix:
             // Dark presets need a larger toe lift so blacks stay editable.
-            return FlatBaselineSettings(shadowLift: 0.26, highlightRollOff: 0.96, blackLift: 0.032, contrast: 0.90)
+            return FlatBaselineSettings(shadowLift: 0.26, highlightRollOff: 0.96, blackLift: 0.032, contrast: 1.00)
         case .matrix, .bladeRunner2049, .dune, .revenant, .hero:
-            return FlatBaselineSettings(shadowLift: 0.20, highlightRollOff: 0.97, blackLift: 0.024, contrast: 0.93)
+            return FlatBaselineSettings(shadowLift: 0.20, highlightRollOff: 0.97, blackLift: 0.024, contrast: 1.03)
         default:
-            return FlatBaselineSettings(shadowLift: 0.14, highlightRollOff: 0.98, blackLift: 0.018, contrast: 0.96)
+            return FlatBaselineSettings(shadowLift: 0.14, highlightRollOff: 0.98, blackLift: 0.018, contrast: 1.06)
         }
     }
 
