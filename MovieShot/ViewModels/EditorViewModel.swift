@@ -460,7 +460,7 @@ final class EditorViewModel: ObservableObject {
             let controls = CIFilter.colorControls()
             controls.inputImage = output
             controls.saturation = 0.82
-            controls.contrast = 1.13
+            controls.contrast = 1.08
             controls.brightness = -0.01
             output = controls.outputImage ?? output
 
@@ -489,7 +489,7 @@ final class EditorViewModel: ObservableObject {
             let controls = CIFilter.colorControls()
             controls.inputImage = output
             controls.saturation = 1.12
-            controls.contrast = 1.17
+            controls.contrast = 1.10
             controls.brightness = 0.02
             output = controls.outputImage ?? output
 
@@ -522,7 +522,7 @@ final class EditorViewModel: ObservableObject {
             let bwControls = CIFilter.colorControls()
             bwControls.inputImage = bw
             bwControls.saturation = 0.0
-            bwControls.contrast = 1.4
+            bwControls.contrast = 1.30
             bwControls.brightness = 0.0
             bw = bwControls.outputImage ?? bw
 
@@ -571,7 +571,7 @@ final class EditorViewModel: ObservableObject {
             let controls = CIFilter.colorControls()
             controls.inputImage = output
             controls.saturation = 0.65
-            controls.contrast = 1.20
+            controls.contrast = 1.10
             controls.brightness = -0.02
             output = controls.outputImage ?? output
 
@@ -615,7 +615,7 @@ final class EditorViewModel: ObservableObject {
             let controls = CIFilter.colorControls()
             controls.inputImage = output
             controls.saturation = 1.05
-            controls.contrast = 1.13
+            controls.contrast = 1.10
             controls.brightness = -0.01
             output = controls.outputImage ?? output
 
@@ -670,7 +670,7 @@ final class EditorViewModel: ObservableObject {
             let controls = CIFilter.colorControls()
             controls.inputImage = output
             controls.saturation = 1.20
-            controls.contrast = 1.23
+            controls.contrast = 1.13
             controls.brightness = -0.01
             output = controls.outputImage ?? output
 
@@ -700,7 +700,7 @@ final class EditorViewModel: ObservableObject {
             let controls = CIFilter.colorControls()
             controls.inputImage = output
             controls.saturation = 1.13
-            controls.contrast = 1.30
+            controls.contrast = 1.15
             controls.brightness = -0.03
             output = controls.outputImage ?? output
 
@@ -875,7 +875,7 @@ final class EditorViewModel: ObservableObject {
             let controls = CIFilter.colorControls()
             controls.inputImage = output
             controls.saturation = 0.72
-            controls.contrast = 1.14
+            controls.contrast = 1.12
             controls.brightness = -0.02
             output = controls.outputImage ?? output
 
@@ -914,7 +914,7 @@ final class EditorViewModel: ObservableObject {
             let controls = CIFilter.colorControls()
             controls.inputImage = output
             controls.saturation = 1.28
-            controls.contrast = 1.15
+            controls.contrast = 1.12
             controls.brightness = -0.01
             output = controls.outputImage ?? output
 
@@ -953,7 +953,7 @@ final class EditorViewModel: ObservableObject {
             let controls = CIFilter.colorControls()
             controls.inputImage = output
             controls.saturation = 1.08
-            controls.contrast = 1.06
+            controls.contrast = 1.08
             controls.brightness = 0.015
             output = controls.outputImage ?? output
 
