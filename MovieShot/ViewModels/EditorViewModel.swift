@@ -411,6 +411,7 @@ final class EditorViewModel: ObservableObject {
         cropOffset: CGSize
     ) -> CIImage {
         var output = applyMoviePreset(preset, to: inputImage)
+        output = applyFlatBaselineTone(to: output, preset: preset)
 
         if abs(exposure) > 0.0001 {
             let exposureFilter = CIFilter.exposureAdjust()
@@ -442,6 +443,54 @@ final class EditorViewModel: ObservableObject {
         }
 
         output = applyPresetFinish(preset, to: output)
+
+        return output
+    }
+
+    private struct FlatBaselineSettings {
+        let shadowLift: CGFloat
+        let highlightRollOff: CGFloat
+        let blackLift: CGFloat
+        let contrast: CGFloat
+    }
+
+    nonisolated private static func flatBaselineSettings(for preset: MoviePreset) -> FlatBaselineSettings {
+        switch preset {
+        case .sinCity, .theBatman, .drive, .madMax, .seven, .orderOfPhoenix:
+            // Dark presets need a larger toe lift so blacks stay editable.
+            return FlatBaselineSettings(shadowLift: 0.26, highlightRollOff: 0.96, blackLift: 0.032, contrast: 0.90)
+        case .matrix, .bladeRunner2049, .dune, .revenant, .hero:
+            return FlatBaselineSettings(shadowLift: 0.20, highlightRollOff: 0.97, blackLift: 0.024, contrast: 0.93)
+        default:
+            return FlatBaselineSettings(shadowLift: 0.14, highlightRollOff: 0.98, blackLift: 0.018, contrast: 0.96)
+        }
+    }
+
+    nonisolated private static func applyFlatBaselineTone(to image: CIImage, preset: MoviePreset) -> CIImage {
+        let settings = flatBaselineSettings(for: preset)
+        var output = image
+
+        let shadowHighlight = CIFilter.highlightShadowAdjust()
+        shadowHighlight.inputImage = output
+        shadowHighlight.shadowAmount = Float(settings.shadowLift)
+        shadowHighlight.highlightAmount = Float(settings.highlightRollOff)
+        output = shadowHighlight.outputImage ?? output
+
+        if let toneCurve = CIFilter(name: "CIToneCurve") {
+            toneCurve.setValue(output, forKey: kCIInputImageKey)
+            toneCurve.setValue(CIVector(x: 0.00, y: settings.blackLift), forKey: "inputPoint0")
+            toneCurve.setValue(CIVector(x: 0.25, y: 0.25 + settings.blackLift * 0.6), forKey: "inputPoint1")
+            toneCurve.setValue(CIVector(x: 0.50, y: 0.50), forKey: "inputPoint2")
+            toneCurve.setValue(CIVector(x: 0.75, y: 0.75 - settings.blackLift * 0.2), forKey: "inputPoint3")
+            toneCurve.setValue(CIVector(x: 1.00, y: 1.00), forKey: "inputPoint4")
+            output = toneCurve.outputImage ?? output
+        }
+
+        let controls = CIFilter.colorControls()
+        controls.inputImage = output
+        controls.contrast = Float(settings.contrast)
+        controls.brightness = Float(settings.blackLift * 0.35)
+        output = controls.outputImage ?? output
 
         return output
     }
@@ -1138,8 +1187,8 @@ final class EditorViewModel: ObservableObject {
         radial.setValue(radius0, forKey: "inputRadius0")
         radial.setValue(radius1, forKey: "inputRadius1")
         // Inverted colors for a multiply mask: white (1.0) inside, darkened outside
-        // The outer luma depends on strength. 1.0 = no checking, 0.0 = black.
-        let outerLuma = max(0.0, 1.0 - strength)
+        // Keep edges moody but avoid clipping to unrecoverable blacks.
+        let outerLuma = max(0.78, 1.0 - strength * 0.55)
         
         radial.setValue(CIColor(red: 1, green: 1, blue: 1, alpha: 1), forKey: "inputColor0")
         radial.setValue(CIColor(red: outerLuma, green: outerLuma, blue: outerLuma, alpha: 1), forKey: "inputColor1")
