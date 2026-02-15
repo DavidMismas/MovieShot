@@ -129,8 +129,19 @@ final class CameraService: NSObject, ObservableObject {
             if outputDimensions.width > 0 && outputDimensions.height > 0 {
                 settings.maxPhotoDimensions = outputDimensions
             }
-            // Prioritize final still quality over capture speed.
-            settings.photoQualityPrioritization = .quality
+            // Never exceed what the current output/device configuration supports.
+            // Exceeding maxPhotoQualityPrioritization can crash at capture time.
+            let maxPriority = self.photoOutput.maxPhotoQualityPrioritization
+            switch maxPriority {
+            case .quality:
+                settings.photoQualityPrioritization = .quality
+            case .balanced:
+                settings.photoQualityPrioritization = .balanced
+            case .speed:
+                settings.photoQualityPrioritization = .speed
+            @unknown default:
+                settings.photoQualityPrioritization = .balanced
+            }
             if #available(iOS 18.0, *),
                shouldSuppressShutterSound,
                self.photoOutput.isShutterSoundSuppressionSupported {
@@ -193,6 +204,7 @@ final class CameraService: NSObject, ObservableObject {
             self.session.beginConfiguration()
             if self.session.canAddOutput(self.photoOutput) {
                 self.session.addOutput(self.photoOutput)
+                self.photoOutput.maxPhotoQualityPrioritization = .quality
             }
             self.updateAppleProRAWAvailability(inConfiguration: true)
             self.session.commitConfiguration()
