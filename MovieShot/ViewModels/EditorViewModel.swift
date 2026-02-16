@@ -22,8 +22,10 @@ final class EditorViewModel: ObservableObject {
     }
     /// Full-resolution source image, used for final export.
     private var fullResSourceImage: UIImage?
-    /// Optional Apple ProRAW data for highest-quality final export render.
-    private var proRawSourceData: Data?
+    /// Optional RAW source data for highest-quality final export render.
+    private var rawSourceData: Data?
+    /// Controls whether full-resolution export should be developed from RAW.
+    private var useRAWSourceForExport = true
     /// Downscaled source image used for interactive editing preview.
     @Published var sourceImage: UIImage? {
         didSet { applyEdits() }
@@ -121,13 +123,18 @@ final class EditorViewModel: ObservableObject {
     }
 
     func captureFromCamera() {
+        guard cameraService.isSessionRunning else { return }
+        statusMessage = nil
+        showPresetLoading = true
         cameraService.capturePhoto()
     }
 
-    func setSourceImage(_ image: UIImage, proRawData: Data? = nil) {
+    func setSourceImage(_ image: UIImage, rawData: Data? = nil, useRAWForExport: Bool = true) {
         loadingTask?.cancel()
         invalidatePreviewRenders()
-        proRawSourceData = proRawData
+        rawSourceData = rawData
+        useRAWSourceForExport = useRAWForExport
+        showPresetLoading = true
 
         let ciContext = self.ciContext
         loadingTask = Task.detached(priority: .userInitiated) {
@@ -142,7 +149,6 @@ final class EditorViewModel: ObservableObject {
                 self.sourceImage = preview
 
                 self.cameraService.stopSession()
-                self.showPresetLoading = true
 
                 self.loadingTask = Task {
                     try? await Task.sleep(nanoseconds: 700_000_000)
@@ -170,7 +176,8 @@ final class EditorViewModel: ObservableObject {
         invalidatePreviewRenders()
         step = .source
         fullResSourceImage = nil
-        proRawSourceData = nil
+        rawSourceData = nil
+        useRAWSourceForExport = true
         sourceImage = nil
         editedImage = nil
         selectedPreset = .matrix
@@ -191,8 +198,9 @@ final class EditorViewModel: ObservableObject {
     /// Prefers RAW source for maximum quality.
     func renderFullResolution() -> UIImage? {
         let inputImage: CIImage
-        if let proRawSourceData,
-           let ci = makeCIImageFromProRAWData(proRawSourceData) {
+        if useRAWSourceForExport,
+           let rawSourceData,
+           let ci = makeCIImageFromRAWData(rawSourceData) {
             inputImage = ci
         } else if let fullRes = fullResSourceImage, let ci = CIImage(image: fullRes) {
             inputImage = ci
@@ -273,22 +281,24 @@ final class EditorViewModel: ObservableObject {
     private func handleCameraCaptureResult(_ result: CameraCaptureResult) {
         if let processedData = result.processedData,
            let image = UIImage(data: processedData) {
-            setSourceImage(image, proRawData: result.rawData)
+            // Pure RAW capture can look overexposed when developed via CIRAWFilter.
+            // Keep RAW data, but export from processed source for WYSIWYG parity.
+            let useRAWForExport = cameraService.captureFormat != .pureRAW
+            setSourceImage(image, rawData: result.rawData, useRAWForExport: useRAWForExport)
             return
         }
 
         if let rawData = result.rawData,
-           let ci = makeCIImageFromProRAWData(rawData),
-           let cgImage = ciContext.createCGImage(ci, from: ci.extent) {
-            let image = UIImage(cgImage: cgImage)
-            setSourceImage(image, proRawData: rawData)
+           let previewImage = makePreviewImageFromRAWData(rawData) {
+            setSourceImage(previewImage, rawData: rawData)
             return
         }
 
+        showPresetLoading = false
         statusMessage = "Photo capture failed."
     }
 
-    private func makeCIImageFromProRAWData(_ data: Data) -> CIImage? {
+    private func makeCIImageFromRAWData(_ data: Data) -> CIImage? {
         if let rawFilter = CIFilter(
             imageData: data,
             options: [CIRAWFilterOption.allowDraftMode: false]
@@ -301,6 +311,25 @@ final class EditorViewModel: ObservableObject {
             data: data,
             options: [.applyOrientationProperty: true]
         )
+    }
+
+    private func makePreviewImageFromRAWData(_ data: Data, maxDimension: CGFloat = 2200) -> UIImage? {
+        guard let ci = makeCIImageFromRAWData(data) else { return nil }
+        guard ci.extent.width > 0, ci.extent.height > 0 else { return nil }
+
+        let maxSide = max(ci.extent.width, ci.extent.height)
+        let scale = min(1.0, maxDimension / maxSide)
+        let previewCIImage: CIImage
+        if scale < 0.999 {
+            previewCIImage = ci.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        } else {
+            previewCIImage = ci
+        }
+
+        guard let cgImage = ciContext.createCGImage(previewCIImage, from: previewCIImage.extent.integral) else {
+            return nil
+        }
+        return UIImage(cgImage: cgImage)
     }
 
     private func loadFromPicker() {

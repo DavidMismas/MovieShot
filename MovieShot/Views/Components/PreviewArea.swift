@@ -68,8 +68,8 @@ struct PreviewArea: View {
             .padding(10)
         }
         .overlay(alignment: .topTrailing) {
-            if viewModel.cameraService.appleProRAWActive {
-                Text("ProRAW")
+            if let badgeText = viewModel.cameraService.activeCaptureBadgeText {
+                Text(badgeText)
                     .font(.caption.weight(.bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 10)
@@ -88,7 +88,57 @@ struct PreviewArea: View {
                     .position(x: focusIndicatorPoint.x, y: focusIndicatorPoint.y)
             }
         }
+        .overlay(alignment: .bottom) {
+            if viewModel.cameraService.exposureControlEnabled,
+               viewModel.cameraService.exposureControlSupported {
+                exposureControlOverlay
+            }
+        }
         .clipped()
+    }
+
+    private var exposureControlOverlay: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                Text("Exposure")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+
+                Spacer()
+
+                Text("\(viewModel.cameraService.exposureBias, specifier: "%+.1f") EV")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .monospacedDigit()
+
+                if abs(viewModel.cameraService.exposureBias) > 0.05 {
+                    Button("Reset") {
+                        viewModel.cameraService.resetExposureBias()
+                    }
+                    .font(.caption2.weight(.semibold))
+                    .buttonStyle(.bordered)
+                    .tint(.white)
+                }
+            }
+
+            Slider(
+                value: Binding(
+                    get: { Double(viewModel.cameraService.exposureBias) },
+                    set: { viewModel.cameraService.exposureBias = Float($0) }
+                ),
+                in: Double(viewModel.cameraService.exposureBiasRange.lowerBound)...Double(viewModel.cameraService.exposureBiasRange.upperBound),
+                step: 0.1
+            )
+            .tint(cinemaAmber)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(.white.opacity(0.2), lineWidth: 1)
+        )
+        .padding(10)
     }
 
     private var focusIndicator: some View {

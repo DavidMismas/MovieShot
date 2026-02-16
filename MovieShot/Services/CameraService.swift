@@ -19,11 +19,33 @@ struct CameraCaptureResult {
     let rawData: Data?
 }
 
+enum CameraCaptureFormat: String, CaseIterable, Identifiable {
+    case jpg
+    case appleProRAW
+    case pureRAW
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .jpg:
+            return "JPG"
+        case .appleProRAW:
+            return "ProRAW"
+        case .pureRAW:
+            return "Pure RAW"
+        }
+    }
+}
+
 final class CameraService: NSObject, ObservableObject {
     private enum PreferenceKey {
         static let hapticsEnabled = "camera.hapticsEnabled"
         static let shutterSoundEnabled = "camera.shutterSoundEnabled"
-        static let appleProRAWEnabled = "camera.appleProRAWEnabled"
+        static let captureFormat = "camera.captureFormat"
+        static let exposureControlEnabled = "camera.exposureControlEnabled"
+        static let exposureBias = "camera.exposureBias"
+        static let legacyAppleProRAWEnabled = "camera.appleProRAWEnabled"
     }
 
     @Published private(set) var authorizationStatus: AVAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
@@ -35,6 +57,10 @@ final class CameraService: NSObject, ObservableObject {
     @Published private(set) var deviceChangeCount = 0
     @Published private(set) var appleProRAWSupported = false
     @Published private(set) var appleProRAWActive = false
+    @Published private(set) var pureRAWSupported = false
+    @Published private(set) var pureRAWActive = false
+    @Published private(set) var exposureControlSupported = false
+    @Published private(set) var exposureBiasRange: ClosedRange<Float> = -2.0...2.0
     @Published var hapticsEnabled: Bool {
         didSet {
             UserDefaults.standard.set(hapticsEnabled, forKey: PreferenceKey.hapticsEnabled)
@@ -45,10 +71,27 @@ final class CameraService: NSObject, ObservableObject {
             UserDefaults.standard.set(shutterSoundEnabled, forKey: PreferenceKey.shutterSoundEnabled)
         }
     }
-    @Published var appleProRAWEnabled: Bool {
+    @Published var captureFormat: CameraCaptureFormat {
         didSet {
-            UserDefaults.standard.set(appleProRAWEnabled, forKey: PreferenceKey.appleProRAWEnabled)
-            refreshAppleProRAWConfiguration()
+            UserDefaults.standard.set(captureFormat.rawValue, forKey: PreferenceKey.captureFormat)
+            refreshCaptureConfigurationForCurrentFormat()
+        }
+    }
+    @Published var exposureControlEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(exposureControlEnabled, forKey: PreferenceKey.exposureControlEnabled)
+        }
+    }
+    @Published var exposureBias: Float {
+        didSet {
+            let clamped = min(max(exposureBias, exposureBiasRange.lowerBound), exposureBiasRange.upperBound)
+            if abs(exposureBias - clamped) > 0.0001 {
+                exposureBias = clamped
+                return
+            }
+
+            UserDefaults.standard.set(Double(clamped), forKey: PreferenceKey.exposureBias)
+            applyExposureBiasToCurrentDevice()
         }
     }
 
@@ -67,6 +110,17 @@ final class CameraService: NSObject, ObservableObject {
     private let frontDiscoverySession: AVCaptureDevice.DiscoverySession
 
     private let sessionQueue = DispatchQueue(label: "com.movieshot.session")
+
+    var activeCaptureBadgeText: String? {
+        switch captureFormat {
+        case .appleProRAW:
+            return appleProRAWActive ? "ProRAW" : nil
+        case .pureRAW:
+            return pureRAWActive ? "RAW" : nil
+        case .jpg:
+            return nil
+        }
+    }
 
     override init() {
         let physicalTypes: [AVCaptureDevice.DeviceType] = [
@@ -91,7 +145,17 @@ final class CameraService: NSObject, ObservableObject {
         )
         self.hapticsEnabled = UserDefaults.standard.object(forKey: PreferenceKey.hapticsEnabled) as? Bool ?? true
         self.shutterSoundEnabled = UserDefaults.standard.object(forKey: PreferenceKey.shutterSoundEnabled) as? Bool ?? true
-        self.appleProRAWEnabled = UserDefaults.standard.object(forKey: PreferenceKey.appleProRAWEnabled) as? Bool ?? false
+        self.exposureControlEnabled = UserDefaults.standard.object(forKey: PreferenceKey.exposureControlEnabled) as? Bool ?? true
+        let storedExposureBias = UserDefaults.standard.object(forKey: PreferenceKey.exposureBias) as? Double ?? 0.0
+        self.exposureBias = Float(storedExposureBias)
+        if let storedCaptureFormat = UserDefaults.standard.string(forKey: PreferenceKey.captureFormat),
+           let captureFormat = CameraCaptureFormat(rawValue: storedCaptureFormat) {
+            self.captureFormat = captureFormat
+        } else {
+            let legacyAppleProRAWEnabled =
+                UserDefaults.standard.object(forKey: PreferenceKey.legacyAppleProRAWEnabled) as? Bool ?? false
+            self.captureFormat = legacyAppleProRAWEnabled ? .appleProRAW : .jpg
+        }
 
         super.init()
         session.sessionPreset = .photo
@@ -107,18 +171,10 @@ final class CameraService: NSObject, ObservableObject {
 
         sessionQueue.async { [weak self] in
             guard let self else { return }
-            self.updateAppleProRAWAvailability(inConfiguration: false)
+            self.updateRAWAvailability(inConfiguration: false)
 
             let processedFormat: [String: Any] = [AVVideoCodecKey: self.preferredProcessedCodec()]
-            let settings: AVCapturePhotoSettings
-            if let rawPixelType = self.preferredAppleProRAWPixelFormatForCapture() {
-                settings = AVCapturePhotoSettings(
-                    rawPixelFormatType: rawPixelType,
-                    processedFormat: processedFormat
-                )
-            } else {
-                settings = AVCapturePhotoSettings(format: processedFormat)
-            }
+            let settings = self.makePhotoSettings(processedFormat: processedFormat)
 
             if let connection = self.photoOutput.connection(with: .video),
                connection.isVideoMirroringSupported {
@@ -126,21 +182,25 @@ final class CameraService: NSObject, ObservableObject {
             }
 
             let outputDimensions = self.photoOutput.maxPhotoDimensions
-            if outputDimensions.width > 0 && outputDimensions.height > 0 {
+            if self.captureFormat != .pureRAW,
+               outputDimensions.width > 0 && outputDimensions.height > 0 {
                 settings.maxPhotoDimensions = outputDimensions
             }
-            // Never exceed what the current output/device configuration supports.
-            // Exceeding maxPhotoQualityPrioritization can crash at capture time.
-            let maxPriority = self.photoOutput.maxPhotoQualityPrioritization
-            switch maxPriority {
-            case .quality:
-                settings.photoQualityPrioritization = .quality
-            case .balanced:
-                settings.photoQualityPrioritization = .balanced
-            case .speed:
-                settings.photoQualityPrioritization = .speed
-            @unknown default:
-                settings.photoQualityPrioritization = .balanced
+            // RAW captures do not support photoQualityPrioritization and will throw
+            // "Unsupported when capturing RAW" if we attempt to set it.
+            if settings.rawPhotoPixelFormatType == 0 {
+                // Favor responsiveness for interactive camera UX.
+                let maxPriority = self.photoOutput.maxPhotoQualityPrioritization
+                let preferredPriority: AVCapturePhotoOutput.QualityPrioritization
+                switch maxPriority {
+                case .quality, .balanced:
+                    preferredPriority = .balanced
+                case .speed:
+                    preferredPriority = .speed
+                @unknown default:
+                    preferredPriority = .balanced
+                }
+                settings.photoQualityPrioritization = preferredPriority
             }
             if #available(iOS 18.0, *),
                shouldSuppressShutterSound,
@@ -206,7 +266,7 @@ final class CameraService: NSObject, ObservableObject {
                 self.session.addOutput(self.photoOutput)
                 self.photoOutput.maxPhotoQualityPrioritization = .quality
             }
-            self.updateAppleProRAWAvailability(inConfiguration: true)
+            self.updateRAWAvailability(inConfiguration: true)
             self.session.commitConfiguration()
 
             self.isConfigured = true
@@ -262,6 +322,10 @@ final class CameraService: NSObject, ObservableObject {
         }
     }
 
+    func resetExposureBias() {
+        exposureBias = 0.0
+    }
+
     func focusAndExpose(at devicePoint: CGPoint) {
         sessionQueue.async { [weak self] in
             guard let self, let device = self.currentInput?.device else { return }
@@ -294,6 +358,13 @@ final class CameraService: NSObject, ObservableObject {
                 }
 
                 device.isSubjectAreaChangeMonitoringEnabled = true
+
+                let minBias = Float(device.minExposureTargetBias)
+                let maxBias = Float(device.maxExposureTargetBias)
+                if maxBias - minBias > 0.0001 {
+                    let clamped = min(max(self.exposureBias, minBias), maxBias)
+                    device.setExposureTargetBias(clamped, completionHandler: nil)
+                }
             } catch {
                 print("CameraService: focus/exposure error: \(error)")
             }
@@ -321,36 +392,38 @@ final class CameraService: NSObject, ObservableObject {
             )
         }
 
-        // Digital crop lenses on the wide-angle camera
-        if position == .back, uniqueDevices.contains(where: { $0.deviceType == .builtInWideAngleCamera }) {
-            lenses.append(CameraLens(
-                id: "\(position.rawValue)-wide-1.5x",
-                name: "35mm",
-                deviceType: .builtInWideAngleCamera,
-                position: position,
-                zoomFactor: 1.5,
-                sortOrder: 10
-            ))
-            lenses.append(CameraLens(
-                id: "\(position.rawValue)-wide-2x",
-                name: "50mm",
-                deviceType: .builtInWideAngleCamera,
-                position: position,
-                zoomFactor: 2.0,
-                sortOrder: 15
-            ))
-        }
+        if captureFormat != .pureRAW {
+            // Digital crop lenses on the wide-angle camera
+            if position == .back, uniqueDevices.contains(where: { $0.deviceType == .builtInWideAngleCamera }) {
+                lenses.append(CameraLens(
+                    id: "\(position.rawValue)-wide-1.5x",
+                    name: "35mm",
+                    deviceType: .builtInWideAngleCamera,
+                    position: position,
+                    zoomFactor: 1.5,
+                    sortOrder: 10
+                ))
+                lenses.append(CameraLens(
+                    id: "\(position.rawValue)-wide-2x",
+                    name: "50mm",
+                    deviceType: .builtInWideAngleCamera,
+                    position: position,
+                    zoomFactor: 2.0,
+                    sortOrder: 15
+                ))
+            }
 
-        // Digital crop lens on the Telephoto camera
-        if position == .back, uniqueDevices.contains(where: { $0.deviceType == .builtInTelephotoCamera }) {
-            lenses.append(CameraLens(
-                id: "\(position.rawValue)-tele-2x",
-                name: "2x Tele",
-                deviceType: .builtInTelephotoCamera,
-                position: position,
-                zoomFactor: 2.0,
-                sortOrder: 25
-            ))
+            // Digital crop lens on the Telephoto camera
+            if position == .back, uniqueDevices.contains(where: { $0.deviceType == .builtInTelephotoCamera }) {
+                lenses.append(CameraLens(
+                    id: "\(position.rawValue)-tele-2x",
+                    name: "2x Tele",
+                    deviceType: .builtInTelephotoCamera,
+                    position: position,
+                    zoomFactor: 2.0,
+                    sortOrder: 25
+                ))
+            }
         }
 
         return lenses.sorted { $0.sortOrder < $1.sortOrder }
@@ -380,8 +453,10 @@ final class CameraService: NSObject, ObservableObject {
         // Same physical device — just update zoom, no session reconfiguration needed
         if let currentInput, currentInput.device == device {
             applyZoom(lens.zoomFactor, to: device)
+            updateExposureCapabilities(for: device)
+            applyExposureBias(exposureBias, to: device)
             updateMaxPhotoDimensions()
-            updateAppleProRAWAvailability(inConfiguration: false)
+            updateRAWAvailability(inConfiguration: false)
             return
         }
 
@@ -405,7 +480,9 @@ final class CameraService: NSObject, ObservableObject {
             session.addInput(input)
             currentInput = input
             applyZoom(lens.zoomFactor, to: device)
-            updateAppleProRAWAvailability(inConfiguration: true)
+            updateExposureCapabilities(for: device)
+            applyExposureBias(exposureBias, to: device)
+            updateRAWAvailability(inConfiguration: true)
             setupCaptureRotationCoordinator(for: device)
 
             DispatchQueue.main.async {
@@ -427,8 +504,50 @@ final class CameraService: NSObject, ObservableObject {
         }
     }
 
+    private func updateExposureCapabilities(for device: AVCaptureDevice) {
+        let minBias = Float(device.minExposureTargetBias)
+        let maxBias = Float(device.maxExposureTargetBias)
+        let supported = maxBias - minBias > 0.0001
+        let range: ClosedRange<Float> = supported ? minBias...maxBias : -2.0...2.0
+
+        DispatchQueue.main.async {
+            self.exposureControlSupported = supported
+            self.exposureBiasRange = range
+
+            let clamped = min(max(self.exposureBias, range.lowerBound), range.upperBound)
+            if abs(self.exposureBias - clamped) > 0.0001 {
+                self.exposureBias = clamped
+            }
+        }
+    }
+
+    private func applyExposureBiasToCurrentDevice() {
+        sessionQueue.async { [weak self] in
+            guard let self, let device = self.currentInput?.device else { return }
+            self.applyExposureBias(self.exposureBias, to: device)
+        }
+    }
+
+    private func applyExposureBias(_ bias: Float, to device: AVCaptureDevice) {
+        let minBias = Float(device.minExposureTargetBias)
+        let maxBias = Float(device.maxExposureTargetBias)
+        guard maxBias - minBias > 0.0001 else { return }
+
+        let clamped = min(max(bias, minBias), maxBias)
+        do {
+            try device.lockForConfiguration()
+            if device.isExposureModeSupported(.continuousAutoExposure) {
+                device.exposureMode = .continuousAutoExposure
+            }
+            device.setExposureTargetBias(clamped, completionHandler: nil)
+            device.unlockForConfiguration()
+        } catch {
+            print("CameraService: exposure bias error: \(error)")
+        }
+    }
+
     /// 12MP cap: 4032×3024
-    private static let maxPixelCount: Int32 = 4032 * 3024
+    private static let captureMaxPixelCount: Int32 = 4032 * 3024
 
     private func updateMaxPhotoDimensions() {
         guard let device = currentInput?.device else { return }
@@ -436,11 +555,10 @@ final class CameraService: NSObject, ObservableObject {
         let supported = device.activeFormat.supportedMaxPhotoDimensions
         guard !supported.isEmpty else { return }
 
-        // Pick the largest supported size up to 12MP; fall back to the smallest if none fit.
+        // Keep all capture formats at 12MP max for stability.
         let capped = supported
-            .filter { $0.width * $0.height <= Self.maxPixelCount }
+            .filter { $0.width * $0.height <= Self.captureMaxPixelCount }
             .max(by: { $0.width * $0.height < $1.width * $1.height })
-
         let dimensions = capped ?? supported.min(by: { $0.width * $0.height < $1.width * $1.height })
         guard let dimensions else { return }
 
@@ -489,9 +607,14 @@ final class CameraService: NSObject, ObservableObject {
         }
     }
 
-    private func refreshAppleProRAWConfiguration() {
+    private func refreshCaptureConfigurationForCurrentFormat() {
         sessionQueue.async { [weak self] in
-            self?.updateAppleProRAWAvailability(inConfiguration: false)
+            guard let self else { return }
+            self.updateRAWAvailability(inConfiguration: false)
+
+            let lenses = self.reloadLenses(for: self.currentPosition)
+            let preferredLens = self.bestLensAfterFormatChange(from: self.selectedLens, availableLenses: lenses)
+            self.configureInput(for: preferredLens)
         }
     }
 
@@ -501,23 +624,80 @@ final class CameraService: NSObject, ObservableObject {
 
     private func preferredAppleProRAWPixelFormatForCapture() -> OSType? {
         guard #available(iOS 14.3, *) else { return nil }
-        guard appleProRAWEnabled, photoOutput.isAppleProRAWEnabled else { return nil }
+        guard captureFormat == .appleProRAW, photoOutput.isAppleProRAWEnabled else { return nil }
         return photoOutput.availableRawPhotoPixelFormatTypes.first(where: { type in
             AVCapturePhotoOutput.isAppleProRAWPixelFormat(type)
         })
     }
 
-    private func updateAppleProRAWAvailability(inConfiguration: Bool) {
+    private func preferredPureRAWPixelFormatForCapture() -> OSType? {
+        let rawTypes = photoOutput.availableRawPhotoPixelFormatTypes
+        guard !rawTypes.isEmpty else { return nil }
+
+        if #available(iOS 14.3, *) {
+            return rawTypes.first(where: { !AVCapturePhotoOutput.isAppleProRAWPixelFormat($0) })
+        }
+
+        return rawTypes.first
+    }
+
+    private func makePhotoSettings(processedFormat: [String: Any]) -> AVCapturePhotoSettings {
+        switch captureFormat {
+        case .jpg:
+            return AVCapturePhotoSettings(format: processedFormat)
+        case .appleProRAW:
+            if let rawPixelType = preferredAppleProRAWPixelFormatForCapture() {
+                return AVCapturePhotoSettings(
+                    rawPixelFormatType: rawPixelType,
+                    processedFormat: processedFormat
+                )
+            }
+            return AVCapturePhotoSettings(format: processedFormat)
+        case .pureRAW:
+            if let rawPixelType = preferredPureRAWPixelFormatForCapture() {
+                let companionFormat: [String: Any] = [AVVideoCodecKey: AVVideoCodecType.jpeg]
+                return AVCapturePhotoSettings(
+                    rawPixelFormatType: rawPixelType,
+                    processedFormat: companionFormat
+                )
+            }
+            return AVCapturePhotoSettings(format: processedFormat)
+        }
+    }
+
+    private func bestLensAfterFormatChange(from previouslySelectedLens: CameraLens?, availableLenses: [CameraLens]) -> CameraLens? {
+        guard let previouslySelectedLens else { return availableLenses.first }
+
+        if let exactMatch = availableLenses.first(where: { $0.id == previouslySelectedLens.id }) {
+            return exactMatch
+        }
+
+        if let samePhysicalLens = availableLenses.first(where: { lens in
+            lens.position == previouslySelectedLens.position &&
+            lens.deviceType == previouslySelectedLens.deviceType &&
+            lens.zoomFactor == 1.0
+        }) {
+            return samePhysicalLens
+        }
+
+        return availableLenses.first
+    }
+
+    private func updateRAWAvailability(inConfiguration: Bool) {
         guard #available(iOS 14.3, *) else {
             DispatchQueue.main.async {
                 self.appleProRAWSupported = false
                 self.appleProRAWActive = false
+                self.pureRAWSupported = false
+                self.pureRAWActive = false
             }
             return
         }
 
-        let supported = photoOutput.isAppleProRAWSupported
-        let shouldEnablePipeline = supported && appleProRAWEnabled
+        let appleProRAWSupported = photoOutput.isAppleProRAWSupported
+        let pureRAWSupported = preferredPureRAWPixelFormatForCapture() != nil
+
+        let shouldEnablePipeline = appleProRAWSupported && captureFormat == .appleProRAW
         if photoOutput.isAppleProRAWEnabled != shouldEnablePipeline {
             if inConfiguration {
                 photoOutput.isAppleProRAWEnabled = shouldEnablePipeline
@@ -528,10 +708,13 @@ final class CameraService: NSObject, ObservableObject {
             }
         }
 
-        let active = shouldEnablePipeline && preferredAppleProRAWPixelFormatForCapture() != nil
+        let appleProRAWActive = shouldEnablePipeline && preferredAppleProRAWPixelFormatForCapture() != nil
+        let pureRAWActive = captureFormat == .pureRAW && preferredPureRAWPixelFormatForCapture() != nil
         DispatchQueue.main.async {
-            self.appleProRAWSupported = supported
-            self.appleProRAWActive = active
+            self.appleProRAWSupported = appleProRAWSupported
+            self.appleProRAWActive = appleProRAWActive
+            self.pureRAWSupported = pureRAWSupported
+            self.pureRAWActive = pureRAWActive
         }
     }
 }

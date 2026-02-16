@@ -76,7 +76,7 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showSettings) {
              SettingsSheet(cameraService: viewModel.cameraService, viewModel: viewModel)
-                 .presentationDetents([.fraction(0.55)])
+                 .presentationDetents([.fraction(0.82), .large])
                  .presentationDragIndicator(.visible)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
