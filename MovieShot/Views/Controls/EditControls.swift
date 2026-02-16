@@ -75,10 +75,11 @@ struct EditControls: View {
                 Text(preset.subtitle)
                     .font(.caption2)
                     .foregroundStyle(locked ? .white.opacity(0.3) : .white.opacity(0.6))
-                    .lineLimit(2)
+                    .lineLimit(3)
                     .multilineTextAlignment(.center)
+                    .frame(height: 42, alignment: .top)
             }
-            .frame(width: 120)
+            .frame(width: 126)
             .padding(.vertical, 12)
             .padding(.horizontal, 8)
             .background(

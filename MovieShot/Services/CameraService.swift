@@ -326,7 +326,7 @@ final class CameraService: NSObject, ObservableObject {
         exposureBias = 0.0
     }
 
-    func focusAndExpose(at devicePoint: CGPoint) {
+    func focus(at devicePoint: CGPoint) {
         sessionQueue.async { [weak self] in
             guard let self, let device = self.currentInput?.device else { return }
 
@@ -348,25 +348,11 @@ final class CameraService: NSObject, ObservableObject {
                     }
                 }
 
-                if device.isExposurePointOfInterestSupported {
-                    device.exposurePointOfInterest = point
-                    if device.isExposureModeSupported(.continuousAutoExposure) {
-                        device.exposureMode = .continuousAutoExposure
-                    } else if device.isExposureModeSupported(.autoExpose) {
-                        device.exposureMode = .autoExpose
-                    }
-                }
-
+                // Keep tap behavior focus-only so EV slider remains the single
+                // exposure control surface (no hidden auto-exposure remetering).
                 device.isSubjectAreaChangeMonitoringEnabled = true
-
-                let minBias = Float(device.minExposureTargetBias)
-                let maxBias = Float(device.maxExposureTargetBias)
-                if maxBias - minBias > 0.0001 {
-                    let clamped = min(max(self.exposureBias, minBias), maxBias)
-                    device.setExposureTargetBias(clamped, completionHandler: nil)
-                }
             } catch {
-                print("CameraService: focus/exposure error: \(error)")
+                print("CameraService: focus error: \(error)")
             }
         }
     }

@@ -50,7 +50,7 @@ struct PreviewArea: View {
                 session: viewModel.cameraService.session,
                 activeDevice: viewModel.cameraService.activeVideoDevice,
                 onTapToFocus: { layerPoint, devicePoint in
-                    viewModel.cameraService.focusAndExpose(at: devicePoint)
+                    viewModel.cameraService.focus(at: devicePoint)
                     showFocusIndicator(at: layerPoint)
                 }
             )
