@@ -61,6 +61,8 @@ final class CameraService: NSObject, ObservableObject {
     @Published private(set) var pureRAWActive = false
     @Published private(set) var exposureControlSupported = false
     @Published private(set) var exposureBiasRange: ClosedRange<Float> = -2.0...2.0
+    @Published private(set) var focusPointSupported = false
+    @Published private(set) var focusLocked = false
     @Published var hapticsEnabled: Bool {
         didSet {
             UserDefaults.standard.set(hapticsEnabled, forKey: PreferenceKey.hapticsEnabled)
@@ -110,6 +112,11 @@ final class CameraService: NSObject, ObservableObject {
     private let frontDiscoverySession: AVCaptureDevice.DiscoverySession
 
     private let sessionQueue = DispatchQueue(label: "com.movieshot.session")
+    private let tapToContinuousFocusDelay: TimeInterval = 0.75
+    private let longPressFocusLockDelay: TimeInterval = 0.25
+    private var focusLockRequested = false
+    private var pendingFocusLockWorkItem: DispatchWorkItem?
+    private var pendingContinuousFocusWorkItem: DispatchWorkItem?
 
     var activeCaptureBadgeText: String? {
         switch captureFormat {
@@ -326,9 +333,17 @@ final class CameraService: NSObject, ObservableObject {
         exposureBias = 0.0
     }
 
-    func focus(at devicePoint: CGPoint) {
+    func focus(at devicePoint: CGPoint, lockFocus: Bool = false) {
         sessionQueue.async { [weak self] in
             guard let self, let device = self.currentInput?.device else { return }
+            guard device.isFocusPointOfInterestSupported else { return }
+            guard device.isFocusModeSupported(.autoFocus) || device.isFocusModeSupported(.continuousAutoFocus) else { return }
+
+            self.cancelPendingFocusTransitions()
+            self.focusLockRequested = lockFocus
+            DispatchQueue.main.async {
+                self.focusLocked = lockFocus
+            }
 
             let point = CGPoint(
                 x: min(max(devicePoint.x, 0.0), 1.0),
@@ -341,18 +356,26 @@ final class CameraService: NSObject, ObservableObject {
 
                 if device.isFocusPointOfInterestSupported {
                     device.focusPointOfInterest = point
-                    if device.isFocusModeSupported(.continuousAutoFocus) {
-                        device.focusMode = .continuousAutoFocus
-                    } else if device.isFocusModeSupported(.autoFocus) {
-                        device.focusMode = .autoFocus
-                    }
                 }
 
-                // Keep tap behavior focus-only so EV slider remains the single
-                // exposure control surface (no hidden auto-exposure remetering).
-                device.isSubjectAreaChangeMonitoringEnabled = true
+                // Start with one-shot focus to honor the tapped position.
+                if device.isFocusModeSupported(.autoFocus) {
+                    device.focusMode = .autoFocus
+                } else if device.isFocusModeSupported(.continuousAutoFocus) {
+                    device.focusMode = .continuousAutoFocus
+                }
+
+                // Tap returns to tracking mode; long-press keeps a lock.
+                device.isSubjectAreaChangeMonitoringEnabled = !lockFocus
             } catch {
                 print("CameraService: focus error: \(error)")
+                return
+            }
+
+            if lockFocus {
+                self.scheduleFocusLockIfNeeded(for: device)
+            } else {
+                self.scheduleReturnToContinuousFocusIfNeeded(for: device)
             }
         }
     }
@@ -430,6 +453,12 @@ final class CameraService: NSObject, ObservableObject {
                 ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: lens.position)
         else { return }
 
+        cancelPendingFocusTransitions()
+        focusLockRequested = false
+        DispatchQueue.main.async {
+            self.focusLocked = false
+        }
+
         defer {
             DispatchQueue.main.async {
                 self.selectedLens = lens
@@ -439,6 +468,7 @@ final class CameraService: NSObject, ObservableObject {
         // Same physical device — just update zoom, no session reconfiguration needed
         if let currentInput, currentInput.device == device {
             applyZoom(lens.zoomFactor, to: device)
+            updateFocusCapabilities(for: device)
             updateExposureCapabilities(for: device)
             applyExposureBias(exposureBias, to: device)
             updateMaxPhotoDimensions()
@@ -466,6 +496,7 @@ final class CameraService: NSObject, ObservableObject {
             session.addInput(input)
             currentInput = input
             applyZoom(lens.zoomFactor, to: device)
+            updateFocusCapabilities(for: device)
             updateExposureCapabilities(for: device)
             applyExposureBias(exposureBias, to: device)
             updateRAWAvailability(inConfiguration: true)
@@ -487,6 +518,82 @@ final class CameraService: NSObject, ObservableObject {
             device.unlockForConfiguration()
         } catch {
             print("CameraService: zoom error: \(error)")
+        }
+    }
+
+    private func cancelPendingFocusTransitions() {
+        pendingFocusLockWorkItem?.cancel()
+        pendingFocusLockWorkItem = nil
+        pendingContinuousFocusWorkItem?.cancel()
+        pendingContinuousFocusWorkItem = nil
+    }
+
+    private func scheduleFocusLockIfNeeded(for device: AVCaptureDevice) {
+        guard device.isFocusModeSupported(.locked) else {
+            focusLockRequested = false
+            DispatchQueue.main.async {
+                self.focusLocked = false
+            }
+            scheduleReturnToContinuousFocusIfNeeded(for: device)
+            return
+        }
+
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            guard self.focusLockRequested else { return }
+            guard self.currentInput?.device == device else { return }
+
+            do {
+                try device.lockForConfiguration()
+                device.focusMode = .locked
+                device.isSubjectAreaChangeMonitoringEnabled = false
+                device.unlockForConfiguration()
+            } catch {
+                print("CameraService: focus lock error: \(error)")
+            }
+        }
+
+        pendingFocusLockWorkItem = work
+        sessionQueue.asyncAfter(deadline: .now() + longPressFocusLockDelay, execute: work)
+    }
+
+    private func scheduleReturnToContinuousFocusIfNeeded(for device: AVCaptureDevice) {
+        guard device.isFocusModeSupported(.continuousAutoFocus) else { return }
+
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            guard !self.focusLockRequested else { return }
+            guard self.currentInput?.device == device else { return }
+
+            do {
+                try device.lockForConfiguration()
+                device.focusMode = .continuousAutoFocus
+                device.isSubjectAreaChangeMonitoringEnabled = true
+                device.unlockForConfiguration()
+            } catch {
+                print("CameraService: focus resume error: \(error)")
+            }
+        }
+
+        pendingContinuousFocusWorkItem = work
+        sessionQueue.asyncAfter(deadline: .now() + tapToContinuousFocusDelay, execute: work)
+    }
+
+    private func updateFocusCapabilities(for device: AVCaptureDevice) {
+        let supported =
+            device.isFocusPointOfInterestSupported &&
+            (device.isFocusModeSupported(.autoFocus) || device.isFocusModeSupported(.continuousAutoFocus))
+
+        if !supported {
+            focusLockRequested = false
+            cancelPendingFocusTransitions()
+        }
+
+        DispatchQueue.main.async {
+            self.focusPointSupported = supported
+            if !supported {
+                self.focusLocked = false
+            }
         }
     }
 

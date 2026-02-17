@@ -6,6 +6,7 @@ struct CameraPreviewView: UIViewRepresentable {
     let session: AVCaptureSession
     let activeDevice: AVCaptureDevice?
     var onTapToFocus: ((CGPoint, CGPoint) -> Void)?
+    var onLongPressToFocusLock: ((CGPoint, CGPoint) -> Void)?
 
     func makeUIView(context: Context) -> PreviewView {
         let view = PreviewView()
@@ -13,6 +14,7 @@ struct CameraPreviewView: UIViewRepresentable {
         view.videoPreviewLayer.session = session
         view.updateActiveDevice(activeDevice)
         view.onTapToFocus = onTapToFocus
+        view.onLongPressToFocusLock = onLongPressToFocusLock
         return view
     }
 
@@ -20,6 +22,7 @@ struct CameraPreviewView: UIViewRepresentable {
         uiView.videoPreviewLayer.session = session
         uiView.updateActiveDevice(activeDevice)
         uiView.onTapToFocus = onTapToFocus
+        uiView.onLongPressToFocusLock = onLongPressToFocusLock
     }
 }
 
@@ -29,6 +32,7 @@ final class PreviewView: UIView {
     private var sessionObservation: NSObjectProtocol?
     private var activeDevice: AVCaptureDevice?
     var onTapToFocus: ((CGPoint, CGPoint) -> Void)?
+    var onLongPressToFocusLock: ((CGPoint, CGPoint) -> Void)?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -125,7 +129,12 @@ final class PreviewView: UIView {
     }
 
     private func setupTapGesture() {
+        let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPressToFocusLock(_:)))
+        longPress.minimumPressDuration = 0.4
+        addGestureRecognizer(longPress)
+
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleTapToFocus(_:)))
+        tap.require(toFail: longPress)
         addGestureRecognizer(tap)
     }
 
@@ -134,6 +143,13 @@ final class PreviewView: UIView {
         let layerPoint = recognizer.location(in: self)
         let devicePoint = videoPreviewLayer.captureDevicePointConverted(fromLayerPoint: layerPoint)
         onTapToFocus?(layerPoint, devicePoint)
+    }
+
+    @objc private func handleLongPressToFocusLock(_ recognizer: UILongPressGestureRecognizer) {
+        guard recognizer.state == .began else { return }
+        let layerPoint = recognizer.location(in: self)
+        let devicePoint = videoPreviewLayer.captureDevicePointConverted(fromLayerPoint: layerPoint)
+        onLongPressToFocusLock?(layerPoint, devicePoint)
     }
 
     deinit {

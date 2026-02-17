@@ -50,7 +50,13 @@ struct PreviewArea: View {
                 session: viewModel.cameraService.session,
                 activeDevice: viewModel.cameraService.activeVideoDevice,
                 onTapToFocus: { layerPoint, devicePoint in
-                    viewModel.cameraService.focus(at: devicePoint)
+                    guard viewModel.cameraService.focusPointSupported else { return }
+                    viewModel.cameraService.focus(at: devicePoint, lockFocus: false)
+                    showFocusIndicator(at: layerPoint)
+                },
+                onLongPressToFocusLock: { layerPoint, devicePoint in
+                    guard viewModel.cameraService.focusPointSupported else { return }
+                    viewModel.cameraService.focus(at: devicePoint, lockFocus: true)
                     showFocusIndicator(at: layerPoint)
                 }
             )
@@ -80,6 +86,21 @@ struct PreviewArea: View {
                             .stroke(.white.opacity(0.35), lineWidth: 1)
                     )
                     .padding(10)
+            }
+        }
+        .overlay(alignment: .top) {
+            if viewModel.cameraService.focusLocked {
+                Text("AF LOCK")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(.black.opacity(0.45), in: Capsule())
+                    .overlay(
+                        Capsule()
+                            .stroke(.white.opacity(0.35), lineWidth: 1)
+                    )
+                    .padding(.top, 10)
             }
         }
         .overlay(alignment: .topLeading) {
