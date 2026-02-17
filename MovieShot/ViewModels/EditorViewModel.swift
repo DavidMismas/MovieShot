@@ -32,8 +32,13 @@ final class EditorViewModel: ObservableObject {
     }
     @Published var editedImage: UIImage?
     @Published var selectedPreset: MoviePreset = .matrix {
-        didSet { applyEdits() }
+        didSet {
+            if isPresetApplied {
+                applyEdits()
+            }
+        }
     }
+    @Published private(set) var isPresetApplied = false
     @Published var exposure: Double = 0.0 {
         didSet { applyEdits() }
     }
@@ -89,6 +94,7 @@ final class EditorViewModel: ObservableObject {
         let generation: Int
         let sourceImage: UIImage
         let preset: MoviePreset
+        let applyPreset: Bool
         let exposure: Double
         let contrast: Double
         let shadows: Double
@@ -142,20 +148,20 @@ final class EditorViewModel: ObservableObject {
             let normalized = await worker.normalizedUpOrientation(for: image)
             let fullRes = await worker.downscaled(image: normalized, maxDimension: 4032)
             let preview = await worker.downscaled(image: normalized, maxDimension: 1800)
+            guard !Task.isCancelled else { return }
 
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.fullResSourceImage = fullRes
+                self.isPresetApplied = false
+                // Show the captured frame immediately, then replace it once the preset render finishes.
+                self.editedImage = preview
                 self.sourceImage = preview
 
                 self.cameraService.stopSession()
-
-                self.loadingTask = Task {
-                    try? await Task.sleep(nanoseconds: 700_000_000)
-                    guard !Task.isCancelled else { return }
-                    self.showPresetLoading = false
-                    self.step = .preset
-                }
+                self.showPresetLoading = false
+                self.step = .preset
+                self.loadingTask = nil
             }
         }
     }
@@ -163,6 +169,20 @@ final class EditorViewModel: ObservableObject {
     func continueStep() {
         guard let next = EditorStep(rawValue: step.rawValue + 1) else { return }
         step = next
+    }
+
+    func selectPreset(_ preset: MoviePreset) {
+        if !isPresetApplied {
+            isPresetApplied = true
+            if selectedPreset != preset {
+                selectedPreset = preset
+            } else {
+                applyEdits()
+            }
+            return
+        }
+
+        selectedPreset = preset
     }
 
     func previousStep() {
@@ -181,6 +201,7 @@ final class EditorViewModel: ObservableObject {
         sourceImage = nil
         editedImage = nil
         selectedPreset = .matrix
+        isPresetApplied = false
         exposure = 0.0
         contrast = 0.0
         shadows = 0.0
@@ -212,6 +233,7 @@ final class EditorViewModel: ObservableObject {
             let output = EditorViewModel.applyFilterChainStatic(
                 to: inputImage,
                 preset: selectedPreset,
+                applyPreset: isPresetApplied,
                 exposure: exposure,
                 contrast: contrast,
                 shadows: shadows,
@@ -374,6 +396,7 @@ final class EditorViewModel: ObservableObject {
             generation: previewRenderGeneration,
             sourceImage: sourceImage,
             preset: selectedPreset,
+            applyPreset: isPresetApplied,
             exposure: exposure,
             contrast: contrast,
             shadows: shadows,
@@ -407,6 +430,7 @@ final class EditorViewModel: ObservableObject {
             let output = EditorViewModel.applyFilterChainStatic(
                 to: ci,
                 preset: request.preset,
+                applyPreset: request.applyPreset,
                 exposure: request.exposure,
                 contrast: request.contrast,
                 shadows: request.shadows,
@@ -458,6 +482,7 @@ final class EditorViewModel: ObservableObject {
     nonisolated private static func applyFilterChainStatic(
         to inputImage: CIImage,
         preset: MoviePreset,
+        applyPreset: Bool,
         exposure: Double,
         contrast: Double,
         shadows: Double,
@@ -465,8 +490,11 @@ final class EditorViewModel: ObservableObject {
         cropOption: CropOption,
         cropOffset: CGSize
     ) -> CIImage {
-        var output = applyMoviePreset(preset, to: inputImage)
-        output = applyFlatBaselineTone(to: output, preset: preset)
+        var output = inputImage
+        if applyPreset {
+            output = applyMoviePreset(preset, to: output)
+            output = applyFlatBaselineTone(to: output, preset: preset)
+        }
 
         if abs(exposure) > 0.0001 {
             let exposureFilter = CIFilter.exposureAdjust()
@@ -497,7 +525,9 @@ final class EditorViewModel: ObservableObject {
             output = offsetCrop(image: output, targetRatio: ratio, forceHorizontal: cropOption.forceHorizontal, offset: cropOffset)
         }
 
-        output = applyPresetFinish(preset, to: output)
+        if applyPreset {
+            output = applyPresetFinish(preset, to: output)
+        }
 
         return output
     }

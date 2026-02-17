@@ -38,7 +38,7 @@ struct EditControls: View {
                         if locked {
                             showPurchaseView = true
                         } else {
-                            viewModel.selectedPreset = preset
+                            viewModel.selectPreset(preset)
                         }
                     } label: {
                         presetCell(preset: preset, locked: locked)
@@ -54,7 +54,7 @@ struct EditControls: View {
 
     @ViewBuilder
     private func presetCell(preset: MoviePreset, locked: Bool) -> some View {
-        let isSelected = preset == viewModel.selectedPreset
+        let isSelected = viewModel.isPresetApplied && preset == viewModel.selectedPreset
 
         ZStack(alignment: .topTrailing) {
             VStack(spacing: 8) {
