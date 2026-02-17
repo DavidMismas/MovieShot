@@ -53,6 +53,8 @@ enum CropOption: String, CaseIterable, Identifiable {
 enum MoviePreset: String, CaseIterable, Identifiable {
     case matrix
     case bladeRunner2049
+    case studioClean
+    case daylightRun
     case sinCity
     case theBatman
     case strangerThings
@@ -73,6 +75,8 @@ enum MoviePreset: String, CaseIterable, Identifiable {
         switch self {
         case .matrix: return "MathX"
         case .bladeRunner2049: return "Runner 2094"
+        case .studioClean: return "Studio Clean"
+        case .daylightRun: return "Daylight Run"
         case .sinCity: return "Hell City"
         case .theBatman: return "Darkman"
         case .strangerThings: return "Weird Things"
@@ -101,6 +105,8 @@ enum MoviePreset: String, CaseIterable, Identifiable {
         switch self {
         case .matrix: return "Green cast, cool mids, high contrast"
         case .bladeRunner2049: return "Orange highs, teal-purple shadows, wide range"
+        case .studioClean: return "Neutral true color, lifted blacks, clean detail"
+        case .daylightRun: return "Film-inspired daylight pop, rich but natural color"
         case .sinCity: return "Noir B&W, crushed shadows, hard contrast"
         case .theBatman: return "Dark desaturated tone, teal shadows, deep blacks"
         case .strangerThings: return "Amber highlights, teal shadows, vivid 80s tone"

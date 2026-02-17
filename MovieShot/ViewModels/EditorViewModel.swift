@@ -544,6 +544,12 @@ final class EditorViewModel: ObservableObject {
         case .sinCity, .theBatman, .drive, .madMax, .seven, .orderOfPhoenix:
             // Dark presets need a larger toe lift so blacks stay editable.
             return FlatBaselineSettings(shadowLift: 0.26, highlightRollOff: 0.96, blackLift: 0.032, contrast: 1.00)
+        case .studioClean:
+            // Keep a gentle toe so blacks never collapse.
+            return FlatBaselineSettings(shadowLift: 0.22, highlightRollOff: 0.99, blackLift: 0.030, contrast: 1.01)
+        case .daylightRun:
+            // Film-inspired but still lifted in shadows (no crushed blacks).
+            return FlatBaselineSettings(shadowLift: 0.20, highlightRollOff: 0.97, blackLift: 0.026, contrast: 1.04)
         case .matrix, .bladeRunner2049, .dune, .revenant, .hero:
             return FlatBaselineSettings(shadowLift: 0.20, highlightRollOff: 0.97, blackLift: 0.024, contrast: 1.03)
         default:
@@ -639,6 +645,68 @@ final class EditorViewModel: ObservableObject {
             shadowHighlight.inputImage = output
             shadowHighlight.shadowAmount = 0.10
             shadowHighlight.highlightAmount = 0.82
+            return shadowHighlight.outputImage ?? output
+
+        case .studioClean:
+            // Creator-inspired clean grade: neutral WB, clear mids, no stylized FX.
+            let matrix = CIFilter.colorMatrix()
+            matrix.inputImage = image
+            matrix.rVector = CIVector(x: 1.01, y: 0.01, z: 0.00, w: 0.0)
+            matrix.gVector = CIVector(x: 0.01, y: 1.00, z: 0.01, w: 0.0)
+            matrix.bVector = CIVector(x: 0.00, y: 0.02, z: 1.00, w: 0.0)
+            matrix.aVector = CIVector(x: 0.0, y: 0.0, z: 0.0, w: 1.0)
+            matrix.biasVector = CIVector(x: 0.006, y: 0.006, z: 0.006, w: 0.0)
+            var output = matrix.outputImage ?? image
+
+            let controls = CIFilter.colorControls()
+            controls.inputImage = output
+            controls.saturation = 1.06
+            controls.contrast = 1.04
+            controls.brightness = 0.0
+            output = controls.outputImage ?? output
+
+            // Lift deep shadows to avoid crushed blacks.
+            let shadowHighlight = CIFilter.highlightShadowAdjust()
+            shadowHighlight.inputImage = output
+            shadowHighlight.shadowAmount = 0.12
+            shadowHighlight.highlightAmount = 0.96
+            output = shadowHighlight.outputImage ?? output
+
+            let temperature = CIFilter.temperatureAndTint()
+            temperature.inputImage = output
+            temperature.neutral = CIVector(x: 6500, y: 0)
+            temperature.targetNeutral = CIVector(x: 6400, y: 0)
+            return temperature.outputImage ?? output
+
+        case .daylightRun:
+            // Film-inspired daylight palette: warm highlights + clean, vivid primaries.
+            let matrix = CIFilter.colorMatrix()
+            matrix.inputImage = image
+            matrix.rVector = CIVector(x: 1.05, y: 0.04, z: 0.00, w: 0.0)
+            matrix.gVector = CIVector(x: 0.02, y: 0.99, z: 0.05, w: 0.0)
+            matrix.bVector = CIVector(x: 0.00, y: 0.07, z: 0.92, w: 0.0)
+            matrix.aVector = CIVector(x: 0.0, y: 0.0, z: 0.0, w: 1.0)
+            matrix.biasVector = CIVector(x: 0.010, y: 0.008, z: 0.006, w: 0.0)
+            var output = matrix.outputImage ?? image
+
+            let controls = CIFilter.colorControls()
+            controls.inputImage = output
+            controls.saturation = 1.11
+            controls.contrast = 1.06
+            controls.brightness = 0.0
+            output = controls.outputImage ?? output
+
+            let temperature = CIFilter.temperatureAndTint()
+            temperature.inputImage = output
+            temperature.neutral = CIVector(x: 6500, y: 0)
+            temperature.targetNeutral = CIVector(x: 6100, y: 6)
+            output = temperature.outputImage ?? output
+
+            // Keep shadows open; never force heavy black clipping.
+            let shadowHighlight = CIFilter.highlightShadowAdjust()
+            shadowHighlight.inputImage = output
+            shadowHighlight.shadowAmount = 0.08
+            shadowHighlight.highlightAmount = 0.92
             return shadowHighlight.outputImage ?? output
 
         case .sinCity:

@@ -159,6 +159,8 @@ struct EditControls: View {
         switch preset {
         case .matrix: return "cpu"
         case .bladeRunner2049: return "sun.haze.fill"
+        case .studioClean: return "camera.aperture"
+        case .daylightRun: return "target"
         case .sinCity: return "circle.lefthalf.filled"
         case .theBatman: return "moon.fill"
         case .strangerThings: return "sparkles.tv.fill"
