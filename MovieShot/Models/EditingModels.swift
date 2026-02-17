@@ -75,8 +75,8 @@ enum MoviePreset: String, CaseIterable, Identifiable {
         switch self {
         case .matrix: return "MathX"
         case .bladeRunner2049: return "Runner 2094"
-        case .studioClean: return "Studio Clean"
-        case .daylightRun: return "Daylight Run"
+        case .studioClean: return "MQHQ"
+        case .daylightRun: return "No Time"
         case .sinCity: return "Hell City"
         case .theBatman: return "Darkman"
         case .strangerThings: return "Weird Things"
