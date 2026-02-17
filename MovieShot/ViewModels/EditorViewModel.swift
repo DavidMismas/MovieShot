@@ -492,8 +492,11 @@ final class EditorViewModel: ObservableObject {
     ) -> CIImage {
         var output = inputImage
         if applyPreset {
-            output = applyMoviePreset(preset, to: output)
-            output = applyFlatBaselineTone(to: output, preset: preset)
+            // Presets should define color science only; keep original luminance/contrast.
+            let sourceTone = output
+            let colorized = applyMoviePreset(preset, to: output)
+            output = preserveSourceLuminance(from: sourceTone, to: colorized)
+            output = applySubtleFilmContrast(to: output, preset: preset)
         }
 
         if abs(exposure) > 0.0001 {
@@ -522,14 +525,43 @@ final class EditorViewModel: ObservableObject {
         }
 
         if let ratio = cropOption.ratio {
-            output = offsetCrop(image: output, targetRatio: ratio, forceHorizontal: cropOption.forceHorizontal, offset: cropOffset)
-        }
-
-        if applyPreset {
-            output = applyPresetFinish(preset, to: output)
+            output = offsetCrop(
+                image: output,
+                targetRatio: ratio,
+                forceHorizontal: cropOption.forceHorizontal,
+                forceVertical: cropOption.forceVertical,
+                offset: cropOffset
+            )
         }
 
         return output
+    }
+
+    nonisolated private static func preserveSourceLuminance(from source: CIImage, to graded: CIImage) -> CIImage {
+        guard let colorBlend = CIFilter(name: "CIColorBlendMode") else { return graded }
+        colorBlend.setValue(graded, forKey: kCIInputImageKey)
+        colorBlend.setValue(source, forKey: kCIInputBackgroundImageKey)
+        return colorBlend.outputImage?.cropped(to: source.extent) ?? graded
+    }
+
+    nonisolated private static func subtleFilmContrast(for preset: MoviePreset) -> CGFloat {
+        switch preset {
+        case .studioClean, .daylightRun:
+            return 1.015
+        default:
+            return 1.03
+        }
+    }
+
+    nonisolated private static func applySubtleFilmContrast(to image: CIImage, preset: MoviePreset) -> CIImage {
+        let contrast = subtleFilmContrast(for: preset)
+        guard abs(contrast - 1.0) > 0.0001 else { return image }
+
+        let controls = CIFilter.colorControls()
+        controls.inputImage = image
+        controls.contrast = Float(contrast)
+        controls.brightness = 0.0
+        return controls.outputImage ?? image
     }
 
     private struct FlatBaselineSettings {
@@ -586,6 +618,54 @@ final class EditorViewModel: ObservableObject {
         return output
     }
 
+    nonisolated private static func applyPrePresetShadowHeadroom(to image: CIImage) -> CIImage {
+        guard let toneCurve = CIFilter(name: "CIToneCurve") else { return image }
+        toneCurve.setValue(image, forKey: kCIInputImageKey)
+        toneCurve.setValue(CIVector(x: 0.00, y: 0.028), forKey: "inputPoint0")
+        toneCurve.setValue(CIVector(x: 0.14, y: 0.17), forKey: "inputPoint1")
+        toneCurve.setValue(CIVector(x: 0.50, y: 0.50), forKey: "inputPoint2")
+        toneCurve.setValue(CIVector(x: 0.82, y: 0.81), forKey: "inputPoint3")
+        toneCurve.setValue(CIVector(x: 1.00, y: 1.00), forKey: "inputPoint4")
+        return toneCurve.outputImage ?? image
+    }
+
+    private struct ShadowProtectionSettings {
+        let toeLift: CGFloat
+        let shadowRecovery: CGFloat
+    }
+
+    nonisolated private static func shadowProtectionSettings(for preset: MoviePreset) -> ShadowProtectionSettings {
+        switch preset {
+        case .matrix, .sinCity, .theBatman, .dune, .drive, .madMax, .seven, .orderOfPhoenix, .hero:
+            return ShadowProtectionSettings(toeLift: 0.032, shadowRecovery: 0.16)
+        case .bladeRunner2049, .strangerThings, .revenant, .inTheMoodForLove, .vertigo, .laLaLand:
+            return ShadowProtectionSettings(toeLift: 0.024, shadowRecovery: 0.12)
+        case .studioClean, .daylightRun:
+            return ShadowProtectionSettings(toeLift: 0.016, shadowRecovery: 0.08)
+        }
+    }
+
+    nonisolated private static func applyShadowDetailProtection(to image: CIImage, preset: MoviePreset) -> CIImage {
+        let settings = shadowProtectionSettings(for: preset)
+        var output = image
+
+        if let toneCurve = CIFilter(name: "CIToneCurve") {
+            toneCurve.setValue(output, forKey: kCIInputImageKey)
+            toneCurve.setValue(CIVector(x: 0.00, y: settings.toeLift), forKey: "inputPoint0")
+            toneCurve.setValue(CIVector(x: 0.18, y: 0.18 + settings.toeLift * 0.70), forKey: "inputPoint1")
+            toneCurve.setValue(CIVector(x: 0.50, y: 0.50), forKey: "inputPoint2")
+            toneCurve.setValue(CIVector(x: 0.78, y: 0.78 - settings.toeLift * 0.20), forKey: "inputPoint3")
+            toneCurve.setValue(CIVector(x: 1.00, y: 1.00), forKey: "inputPoint4")
+            output = toneCurve.outputImage ?? output
+        }
+
+        let shadowHighlight = CIFilter.highlightShadowAdjust()
+        shadowHighlight.inputImage = output
+        shadowHighlight.shadowAmount = Float(settings.shadowRecovery)
+        shadowHighlight.highlightAmount = 0.98
+        return shadowHighlight.outputImage ?? output
+    }
+
     nonisolated private static func applyMoviePreset(_ preset: MoviePreset, to image: CIImage) -> CIImage {
         switch preset {
         case .matrix:
@@ -600,8 +680,8 @@ final class EditorViewModel: ObservableObject {
             let controls = CIFilter.colorControls()
             controls.inputImage = output
             controls.saturation = 0.82
-            controls.contrast = 1.08
-            controls.brightness = -0.01
+            controls.contrast = 1.04
+            controls.brightness = 0.01
             output = controls.outputImage ?? output
 
             let temp = CIFilter.temperatureAndTint()
@@ -730,7 +810,7 @@ final class EditorViewModel: ObservableObject {
 
             let shadowHighlight = CIFilter.highlightShadowAdjust()
             shadowHighlight.inputImage = bw
-            shadowHighlight.shadowAmount = -0.55
+            shadowHighlight.shadowAmount = -0.15
             shadowHighlight.highlightAmount = 0.65
             bw = shadowHighlight.outputImage ?? bw
 
@@ -774,7 +854,7 @@ final class EditorViewModel: ObservableObject {
             controls.inputImage = output
             controls.saturation = 0.65
             controls.contrast = 1.10
-            controls.brightness = -0.02
+            controls.brightness = 0.0
             output = controls.outputImage ?? output
 
             // Cool temperature shift with slight green tint (teal Gotham)
@@ -787,13 +867,13 @@ final class EditorViewModel: ObservableObject {
             // Dark overall feel ~1/3 stop under
             let exposureFilter = CIFilter.exposureAdjust()
             exposureFilter.inputImage = output
-            exposureFilter.ev = -0.4
+            exposureFilter.ev = -0.15
             output = exposureFilter.outputImage ?? output
 
             // Crush shadows, soft highlight roll-off
             let shadowHighlight = CIFilter.highlightShadowAdjust()
             shadowHighlight.inputImage = output
-            shadowHighlight.shadowAmount = -0.3
+            shadowHighlight.shadowAmount = -0.15
             shadowHighlight.highlightAmount = 0.85
             return shadowHighlight.outputImage ?? output
 
@@ -818,7 +898,7 @@ final class EditorViewModel: ObservableObject {
             controls.inputImage = output
             controls.saturation = 1.05
             controls.contrast = 1.10
-            controls.brightness = -0.01
+            controls.brightness = 0.0
             output = controls.outputImage ?? output
 
             // Warm but not overpowering — 5500K keeps it amber without going full orange
@@ -842,8 +922,8 @@ final class EditorViewModel: ObservableObject {
             let controls = CIFilter.colorControls()
             controls.inputImage = output
             controls.saturation = 0.78
-            controls.contrast = 1.12
-            controls.brightness = -0.02
+            controls.contrast = 1.08
+            controls.brightness = 0.0
             output = controls.outputImage ?? output
 
             let temperature = CIFilter.temperatureAndTint()
@@ -854,7 +934,7 @@ final class EditorViewModel: ObservableObject {
 
             let shadowHighlight = CIFilter.highlightShadowAdjust()
             shadowHighlight.inputImage = output
-            shadowHighlight.shadowAmount = -0.14
+            shadowHighlight.shadowAmount = -0.15
             shadowHighlight.highlightAmount = 0.90
             return shadowHighlight.outputImage ?? output
 
@@ -872,8 +952,8 @@ final class EditorViewModel: ObservableObject {
             let controls = CIFilter.colorControls()
             controls.inputImage = output
             controls.saturation = 1.20
-            controls.contrast = 1.13
-            controls.brightness = -0.01
+            controls.contrast = 1.09
+            controls.brightness = 0.0
             output = controls.outputImage ?? output
 
             let temperature = CIFilter.temperatureAndTint()
@@ -884,7 +964,7 @@ final class EditorViewModel: ObservableObject {
 
             let shadowHighlight = CIFilter.highlightShadowAdjust()
             shadowHighlight.inputImage = output
-            shadowHighlight.shadowAmount = -0.22
+            shadowHighlight.shadowAmount = -0.15
             shadowHighlight.highlightAmount = 1.04
             return shadowHighlight.outputImage ?? output
 
@@ -902,8 +982,8 @@ final class EditorViewModel: ObservableObject {
             let controls = CIFilter.colorControls()
             controls.inputImage = output
             controls.saturation = 1.13
-            controls.contrast = 1.15
-            controls.brightness = -0.03
+            controls.contrast = 1.10
+            controls.brightness = 0.0
             output = controls.outputImage ?? output
 
             let temperature = CIFilter.temperatureAndTint()
@@ -914,7 +994,7 @@ final class EditorViewModel: ObservableObject {
 
             let shadowHighlight = CIFilter.highlightShadowAdjust()
             shadowHighlight.inputImage = output
-            shadowHighlight.shadowAmount = -0.30
+            shadowHighlight.shadowAmount = -0.15
             shadowHighlight.highlightAmount = 0.82
             return shadowHighlight.outputImage ?? output
 
@@ -933,7 +1013,7 @@ final class EditorViewModel: ObservableObject {
             controls.inputImage = output
             controls.saturation = 0.73
             controls.contrast = 1.10
-            controls.brightness = -0.025
+            controls.brightness = 0.0
             output = controls.outputImage ?? output
 
             let temperature = CIFilter.temperatureAndTint()
@@ -944,7 +1024,7 @@ final class EditorViewModel: ObservableObject {
 
             let shadowHighlight = CIFilter.highlightShadowAdjust()
             shadowHighlight.inputImage = output
-            shadowHighlight.shadowAmount = -0.08
+            shadowHighlight.shadowAmount = -0.15
             shadowHighlight.highlightAmount = 0.94
             return shadowHighlight.outputImage ?? output
 
@@ -963,7 +1043,7 @@ final class EditorViewModel: ObservableObject {
             controls.inputImage = output
             controls.saturation = 1.01
             controls.contrast = 1.10
-            controls.brightness = -0.01
+            controls.brightness = 0.0
             output = controls.outputImage ?? output
 
             let temperature = CIFilter.temperatureAndTint()
@@ -999,8 +1079,8 @@ final class EditorViewModel: ObservableObject {
             let controls = CIFilter.colorControls()
             controls.inputImage = output
             controls.saturation = 0.68
-            controls.contrast = 1.16
-            controls.brightness = -0.02
+            controls.contrast = 1.10
+            controls.brightness = 0.0
             output = controls.outputImage ?? output
 
             // Cold wet city — cool temperature, slight green tint
@@ -1013,7 +1093,7 @@ final class EditorViewModel: ObservableObject {
             // Slightly crushed shadows, restrained highlights (flashing effect)
             let shadowHighlight = CIFilter.highlightShadowAdjust()
             shadowHighlight.inputImage = output
-            shadowHighlight.shadowAmount = -0.18
+            shadowHighlight.shadowAmount = -0.15
             shadowHighlight.highlightAmount = 0.88
             return shadowHighlight.outputImage ?? output
 
@@ -1038,7 +1118,7 @@ final class EditorViewModel: ObservableObject {
             let controls = CIFilter.colorControls()
             controls.inputImage = output
             controls.saturation = 1.14
-            controls.contrast = 1.12
+            controls.contrast = 1.08
             controls.brightness = 0.01
             output = controls.outputImage ?? output
 
@@ -1077,8 +1157,8 @@ final class EditorViewModel: ObservableObject {
             let controls = CIFilter.colorControls()
             controls.inputImage = output
             controls.saturation = 0.72
-            controls.contrast = 1.12
-            controls.brightness = -0.02
+            controls.contrast = 1.08
+            controls.brightness = 0.0
             output = controls.outputImage ?? output
 
             // Very cool — Ministry of Magic corridors are ice-cold blue
@@ -1091,7 +1171,7 @@ final class EditorViewModel: ObservableObject {
             // Crushed blacks, protected highlights
             let shadowHighlight = CIFilter.highlightShadowAdjust()
             shadowHighlight.inputImage = output
-            shadowHighlight.shadowAmount = -0.22
+            shadowHighlight.shadowAmount = -0.15
             shadowHighlight.highlightAmount = 0.88
             return shadowHighlight.outputImage ?? output
 
@@ -1116,8 +1196,8 @@ final class EditorViewModel: ObservableObject {
             let controls = CIFilter.colorControls()
             controls.inputImage = output
             controls.saturation = 1.28
-            controls.contrast = 1.12
-            controls.brightness = -0.01
+            controls.contrast = 1.08
+            controls.brightness = 0.0
             output = controls.outputImage ?? output
 
             // Warm — the red chapter has a fiery, sun-baked temperature
@@ -1130,7 +1210,7 @@ final class EditorViewModel: ObservableObject {
             // Hold shadows, anamorphic wide latitude in highlights
             let shadowHighlight = CIFilter.highlightShadowAdjust()
             shadowHighlight.inputImage = output
-            shadowHighlight.shadowAmount = -0.08
+            shadowHighlight.shadowAmount = -0.15
             shadowHighlight.highlightAmount = 0.90
             return shadowHighlight.outputImage ?? output
 
@@ -1581,9 +1661,15 @@ final class EditorViewModel: ObservableObject {
         return cube.outputImage ?? image
     }
 
-    /// Crops to `targetRatio`. Auto-swaps orientation to match image unless `forceHorizontal`.
+    /// Crops to `targetRatio`. Auto-swaps orientation unless forced horizontal or vertical.
     /// `offset` is normalized –1…+1 panning within the available slack.
-    nonisolated private static func offsetCrop(image: CIImage, targetRatio: CGFloat, forceHorizontal: Bool, offset: CGSize) -> CIImage {
+    nonisolated private static func offsetCrop(
+        image: CIImage,
+        targetRatio: CGFloat,
+        forceHorizontal: Bool,
+        forceVertical: Bool,
+        offset: CGSize
+    ) -> CIImage {
         let extent = image.extent.integral
         guard extent.width > 0, extent.height > 0 else { return image }
 
@@ -1592,6 +1678,9 @@ final class EditorViewModel: ObservableObject {
         if forceHorizontal {
             // Always use the wider ratio (> 1.0), never swap to vertical
             desiredRatio = Swift.max(targetRatio, 1.0 / targetRatio)
+        } else if forceVertical {
+            // Always use the taller ratio (< 1.0), never swap to horizontal
+            desiredRatio = Swift.min(targetRatio, 1.0 / targetRatio)
         } else {
             let swapped = 1.0 / targetRatio
             desiredRatio = abs(currentRatio - targetRatio) <= abs(currentRatio - swapped)

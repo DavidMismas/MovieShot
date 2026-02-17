@@ -21,6 +21,7 @@ enum EditorStep: Int, CaseIterable {
 enum CropOption: String, CaseIterable, Identifiable {
     case original
     case fourByFive
+    case wall
     case cinema21by9
 
     var id: String { rawValue }
@@ -29,6 +30,7 @@ enum CropOption: String, CaseIterable, Identifiable {
         switch self {
         case .original: return "Original"
         case .fourByFive: return "4:5"
+        case .wall: return "Wall"
         case .cinema21by9: return "21:9"
         }
     }
@@ -37,6 +39,7 @@ enum CropOption: String, CaseIterable, Identifiable {
         switch self {
         case .original: return nil
         case .fourByFive: return 4.0 / 5.0
+        case .wall: return 9.0 / 19.5
         case .cinema21by9: return 21.0 / 9.0
         }
     }
@@ -45,6 +48,14 @@ enum CropOption: String, CaseIterable, Identifiable {
     nonisolated var forceHorizontal: Bool {
         switch self {
         case .cinema21by9: return true
+        default: return false
+        }
+    }
+
+    /// When true, the crop is always portrait (height > width), never swapped.
+    nonisolated var forceVertical: Bool {
+        switch self {
+        case .wall: return true
         default: return false
         }
     }
