@@ -21,11 +21,11 @@ struct ExportControls: View {
             Button {
                 viewModel.saveToLibrary()
             } label: {
-                Label("Save to Gallery", systemImage: "square.and.arrow.down")
+                Label(viewModel.isSavingToLibrary ? "Saving..." : "Save to Gallery", systemImage: "square.and.arrow.down")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
-            .disabled(viewModel.editedImage == nil)
+            .disabled(viewModel.editedImage == nil || viewModel.isSavingToLibrary)
 
             Button {
                 guard let photosURL = URL(string: "photos-redirect://") else { return }

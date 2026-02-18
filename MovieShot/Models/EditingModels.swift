@@ -29,9 +29,9 @@ enum CropOption: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .original: return "Original"
-        case .fourByFive: return "4:5"
+        case .fourByFive: return "Insta"
         case .wall: return "Wall"
-        case .cinema21by9: return "21:9"
+        case .cinema21by9: return "Cine"
         }
     }
 

@@ -119,26 +119,28 @@ struct PreviewArea: View {
     }
 
     private var exposureControlOverlay: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 6) {
             HStack(spacing: 8) {
-                Text("Exposure")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.9))
-
-                Spacer()
+                Image(systemName: "sun.max.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.75))
 
                 Text("\(viewModel.cameraService.exposureBias, specifier: "%+.1f") EV")
-                    .font(.caption.weight(.semibold))
+                    .font(.caption2.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.9))
                     .monospacedDigit()
 
+                Spacer()
+
                 if abs(viewModel.cameraService.exposureBias) > 0.05 {
-                    Button("Reset") {
+                    Button {
                         viewModel.cameraService.resetExposureBias()
+                    } label: {
+                        Image(systemName: "arrow.counterclockwise")
+                            .font(.caption2.weight(.semibold))
                     }
-                    .font(.caption2.weight(.semibold))
-                    .buttonStyle(.bordered)
-                    .tint(.white)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.white.opacity(0.75))
                 }
             }
 
@@ -150,14 +152,15 @@ struct PreviewArea: View {
                 in: Double(viewModel.cameraService.exposureBiasRange.lowerBound)...Double(viewModel.cameraService.exposureBiasRange.upperBound),
                 step: 0.1
             )
+            .controlSize(.mini)
             .tint(cinemaAmber)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(.white.opacity(0.2), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(.white.opacity(0.15), lineWidth: 1)
         )
         .padding(10)
     }

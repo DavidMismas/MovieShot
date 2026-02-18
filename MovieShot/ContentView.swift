@@ -45,10 +45,17 @@ struct ContentView: View {
                         }
                 }
 
+                if viewModel.isSavingToLibrary {
+                    saveProgressToast
+                        .transition(.scale(scale: 0.9).combined(with: .opacity))
+                        .zIndex(10)
+                        .allowsHitTesting(false)
+                }
+
                 if viewModel.showSaveConfirmation {
                     saveConfirmationToast
                         .transition(.scale(scale: 0.9).combined(with: .opacity))
-                        .zIndex(10)
+                        .zIndex(11)
                         .allowsHitTesting(false)
                 }
             }
@@ -204,6 +211,30 @@ struct ContentView: View {
             )
     }
 
+    private var saveProgressToast: some View {
+        VStack(spacing: 10) {
+            ProgressView(value: viewModel.saveProgress, total: 1.0)
+                .progressViewStyle(.linear)
+                .tint(cinemaAmber)
+
+            Text("Saving image...")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white)
+        }
+        .frame(width: 210)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.black.opacity(0.76))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(.white.opacity(0.2), lineWidth: 1)
+                )
+        )
+        .shadow(color: .black.opacity(0.35), radius: 16, x: 0, y: 8)
+    }
+
     private var saveConfirmationToast: some View {
         VStack(spacing: 8) {
             Image(systemName: "checkmark.circle.fill")
@@ -287,7 +318,7 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity)
         }
         .buttonStyle(.bordered)
-        .disabled(viewModel.editedImage == nil)
+        .disabled(viewModel.editedImage == nil || viewModel.isSavingToLibrary)
     }
 }
 

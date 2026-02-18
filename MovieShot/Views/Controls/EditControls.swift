@@ -110,7 +110,13 @@ struct EditControls: View {
 
     private var adjustControls: some View {
         VStack(spacing: 12) {
-            adjustmentSlider(title: "Exposure", value: $viewModel.exposure, range: -2.0...2.0)
+            adjustmentSlider(
+                title: "Exposure",
+                value: $viewModel.exposure,
+                range: -2.0...2.0,
+                isMinimal: true,
+                usesEVFormatting: true
+            )
             adjustmentSlider(title: "Contrast", value: $viewModel.contrast, range: -1.0...1.0)
             adjustmentSlider(title: "Shadows", value: $viewModel.shadows, range: -1.0...1.0)
             adjustmentSlider(title: "Highlights", value: $viewModel.highlights, range: -1.0...1.0)
@@ -136,14 +142,44 @@ struct EditControls: View {
         .background(backgroundStyle)
     }
 
-    private func adjustmentSlider(title: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("\(title): \(String(format: "%.2f", value.wrappedValue))")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.white)
+    private func adjustmentSlider(
+        title: String,
+        value: Binding<Double>,
+        range: ClosedRange<Double>,
+        isMinimal: Bool = false,
+        usesEVFormatting: Bool = false
+    ) -> some View {
+        VStack(alignment: .leading, spacing: isMinimal ? 4 : 6) {
+            if isMinimal {
+                HStack(spacing: 8) {
+                    Text(title)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.88))
+
+                    Spacer()
+
+                    Text(sliderValueText(for: value.wrappedValue, usesEVFormatting: usesEVFormatting))
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.75))
+                        .monospacedDigit()
+                }
+            } else {
+                Text("\(title): \(String(format: "%.2f", value.wrappedValue))")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+            }
+
             Slider(value: value, in: range)
+                .controlSize(isMinimal ? .mini : .regular)
                 .tint(cinemaAmber)
         }
+    }
+
+    private func sliderValueText(for value: Double, usesEVFormatting: Bool) -> String {
+        if usesEVFormatting {
+            return String(format: "%+.1f EV", value)
+        }
+        return String(format: "%.2f", value)
     }
 
     private var backgroundStyle: some View {

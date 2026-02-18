@@ -65,6 +65,8 @@ final class EditorViewModel: ObservableObject {
         didSet { loadFromPicker() }
     }
     @Published var statusMessage: String?
+    @Published var isSavingToLibrary = false
+    @Published var saveProgress: Double = 0.0
     @Published var showSaveConfirmation = false
     @Published var showShareSheet = false
     @Published var showPresetLoading = false
@@ -89,6 +91,9 @@ final class EditorViewModel: ObservableObject {
     private var pendingRenderRequest: RenderRequest?
     private var isRenderingPreview = false
     private var previewRenderGeneration = 0
+    private var saveOverlayShownAt: Date?
+    private let minimumSavingOverlayDuration: TimeInterval = 0.7
+    private let saveConfirmationDurationNanoseconds: UInt64 = 1_500_000_000
 
     private struct RenderRequest {
         let generation: Int
@@ -209,6 +214,9 @@ final class EditorViewModel: ObservableObject {
         cropOption = .original
         cropOffset = .zero
         statusMessage = nil
+        isSavingToLibrary = false
+        saveProgress = 0.0
+        saveOverlayShownAt = nil
         showSaveConfirmation = false
         showShareSheet = false
         showPresetLoading = false
@@ -251,19 +259,46 @@ final class EditorViewModel: ObservableObject {
     // ... rest of class functions ...
 
     func saveToLibrary() {
-        guard let image = renderFullResolution(),
-              let exportResource = makeBestQualityJPEGResource(from: image)
-        else { return }
+        guard !isSavingToLibrary else { return }
+        saveConfirmationTask?.cancel()
         statusMessage = nil
+        saveProgress = 0.08
+        saveOverlayShownAt = Date()
+        withAnimation(.easeInOut(duration: 0.18)) {
+            showSaveConfirmation = false
+            isSavingToLibrary = true
+        }
 
+        Task { [weak self] in
+            guard let self else { return }
+            await Task.yield()
+
+            guard let image = self.renderFullResolution(),
+                  let exportResource = self.makeBestQualityJPEGResource(from: image)
+            else {
+                self.saveProgress = 0.0
+                await self.completeSaveOperation(success: false, errorMessage: "Save failed.")
+                return
+            }
+
+            self.saveProgress = 0.2
+            self.saveExportResourceToLibrary(exportResource)
+        }
+    }
+
+    private func saveExportResourceToLibrary(_ exportResource: (data: Data, uniformTypeIdentifier: String)) {
         PHPhotoLibrary.requestAuthorization(for: .addOnly) { [weak self] status in
             guard let self else { return }
             guard status == .authorized || status == .limited else {
                 Task { @MainActor in
-                    self.showSaveConfirmation = false
-                    self.statusMessage = "Photo save permission denied."
+                    self.saveProgress = 0.0
+                    await self.completeSaveOperation(success: false, errorMessage: "Photo save permission denied.")
                 }
                 return
+            }
+
+            Task { @MainActor in
+                self.saveProgress = 0.5
             }
 
             PHPhotoLibrary.shared().performChanges {
@@ -273,16 +308,41 @@ final class EditorViewModel: ObservableObject {
                 request.addResource(with: .photo, data: exportResource.data, options: options)
             } completionHandler: { success, _ in
                 Task { @MainActor in
-                    if success {
-                        self.statusMessage = nil
-                        self.presentSaveConfirmation()
-                    } else {
-                        self.showSaveConfirmation = false
-                        self.statusMessage = "Save failed."
-                    }
+                    self.saveProgress = success ? 1.0 : 0.0
+                    await self.completeSaveOperation(
+                        success: success,
+                        errorMessage: success ? nil : "Save failed."
+                    )
                 }
             }
         }
+    }
+
+    private func completeSaveOperation(success: Bool, errorMessage: String?) async {
+        await ensureMinimumSavingOverlayDuration()
+        saveOverlayShownAt = nil
+
+        if success {
+            statusMessage = nil
+            presentSaveConfirmation()
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isSavingToLibrary = false
+            }
+        } else {
+            isSavingToLibrary = false
+            showSaveConfirmation = false
+            saveProgress = 0.0
+            statusMessage = errorMessage
+        }
+    }
+
+    private func ensureMinimumSavingOverlayDuration() async {
+        guard let shownAt = saveOverlayShownAt else { return }
+        let elapsed = Date().timeIntervalSince(shownAt)
+        let remaining = minimumSavingOverlayDuration - elapsed
+        guard remaining > 0 else { return }
+        let nanoseconds = UInt64((remaining * 1_000_000_000).rounded())
+        try? await Task.sleep(nanoseconds: nanoseconds)
     }
 
     private func makeBestQualityJPEGResource(from image: UIImage) -> (data: Data, uniformTypeIdentifier: String)? {
@@ -470,10 +530,12 @@ final class EditorViewModel: ObservableObject {
             showSaveConfirmation = true
         }
 
+        let confirmationDuration = saveConfirmationDurationNanoseconds
         saveConfirmationTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 1_400_000_000)
+            try? await Task.sleep(nanoseconds: confirmationDuration)
             guard let self, !Task.isCancelled else { return }
             withAnimation(.easeInOut(duration: 0.2)) {
+                self.saveProgress = 0.0
                 self.showSaveConfirmation = false
             }
         }
