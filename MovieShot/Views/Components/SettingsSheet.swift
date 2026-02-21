@@ -13,6 +13,19 @@ struct SettingsSheet: View {
     private let cinemaSlate = Color(red: 0.11, green: 0.13, blue: 0.17)
     private let panelBackground = Color.black.opacity(0.28)
 
+    private var autoModeBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.autoModeEnabled },
+            set: { newValue in
+                if newValue, viewModel.autoModePreset.isProLocked, !store.isPro {
+                    showPurchaseView = true
+                    return
+                }
+                viewModel.autoModeEnabled = newValue
+            }
+        )
+    }
+
     private var captureFormatStatusMessage: String? {
         switch cameraService.captureFormat {
         case .jpg:
@@ -104,6 +117,61 @@ struct SettingsSheet: View {
 
                         Toggle("Show Exposure Control", isOn: $cameraService.exposureControlEnabled)
                             .tint(cinemaAmber)
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Toggle("Auto Mode", isOn: autoModeBinding)
+                                .tint(cinemaAmber)
+
+                            Menu {
+                                ForEach(MoviePreset.allCases) { preset in
+                                    let locked = preset.isProLocked && !store.isPro
+                                    Button {
+                                        if locked {
+                                            showPurchaseView = true
+                                        } else {
+                                            viewModel.autoModePreset = preset
+                                        }
+                                    } label: {
+                                        if viewModel.autoModePreset == preset {
+                                            Label(locked ? "\(preset.title) - Pro" : preset.title, systemImage: "checkmark")
+                                        } else {
+                                            Text(locked ? "\(preset.title) - Pro" : preset.title)
+                                        }
+                                    }
+                                }
+                            } label: {
+                                HStack {
+                                    Text("Auto Preset")
+                                    Spacer()
+                                    Text(viewModel.autoModePreset.title)
+                                        .foregroundStyle(cinemaTeal)
+                                    Image(systemName: "chevron.up.chevron.down")
+                                        .font(.caption2)
+                                        .foregroundStyle(.white.opacity(0.55))
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 10)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .fill(.white.opacity(0.06))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                .stroke(.white.opacity(0.14), lineWidth: 1)
+                                        )
+                                )
+                            }
+
+                            Text("When enabled, each camera shot is graded with the selected preset and saved directly to Gallery.")
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.65))
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            if viewModel.autoModePreset.isProLocked && !store.isPro {
+                                Text("Selected Auto preset requires Pro.")
+                                    .font(.caption)
+                                    .foregroundStyle(cinemaAmber)
+                            }
+                        }
 
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Capture Format")

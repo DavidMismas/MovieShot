@@ -1,9 +1,12 @@
 import SwiftUI
-import PhotosUI
+internal import AVFoundation
 
 struct SourceControls: View {
     @ObservedObject var viewModel: EditorViewModel
+    @EnvironmentObject var store: StoreService
+    @Environment(\.openURL) private var openURL
     let rotationAngle: Angle
+    @State private var showPurchaseView = false
     
     private let cinemaAmber = Color(red: 0.96, green: 0.69, blue: 0.27)
     private let panelBackground = Color.black.opacity(0.28)
@@ -62,6 +65,10 @@ struct SourceControls: View {
                 .padding(20)
             }
         }
+        .sheet(isPresented: $showPurchaseView) {
+            PurchaseView()
+                .environmentObject(store)
+        }
     }
     
     private var lensControl: some View {
@@ -88,15 +95,33 @@ struct SourceControls: View {
     }
 
     private var galleryControl: some View {
-        PhotosPicker(selection: $viewModel.pickerItem, matching: .images) {
+        Button {
+            guard let photosURL = URL(string: "photos-redirect://") else {
+                viewModel.statusMessage = "Could not open Photos app."
+                return
+            }
+
+            openURL(photosURL) { accepted in
+                if !accepted {
+                    viewModel.statusMessage = "Could not open Photos app."
+                }
+            }
+        } label: {
             CameraToolButton(icon: "photo.stack.fill", title: "Gallery")
                 .rotationEffect(rotationAngle)
                 .animation(.easeInOut, value: rotationAngle)
         }
+        .buttonStyle(.plain)
     }
 
     private var shutterControl: some View {
         Button {
+            if viewModel.autoModeEnabled,
+               viewModel.autoModePreset.isProLocked,
+               !store.isPro {
+                showPurchaseView = true
+                return
+            }
             if viewModel.cameraService.hapticsEnabled {
                 let generator = UIImpactFeedbackGenerator(style: .rigid)
                 generator.impactOccurred(intensity: 1.0)
@@ -116,6 +141,9 @@ struct SourceControls: View {
             .animation(.easeInOut, value: rotationAngle)
         }
         .buttonStyle(.plain)
-        .disabled(viewModel.cameraService.authorizationStatus != .authorized)
+        .disabled(
+            viewModel.cameraService.authorizationStatus != .authorized ||
+            viewModel.isSavingToLibrary
+        )
     }
 }

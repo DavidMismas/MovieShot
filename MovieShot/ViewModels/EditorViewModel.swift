@@ -11,6 +11,8 @@ import UniformTypeIdentifiers
 final class EditorViewModel: ObservableObject {
     private enum PreferenceKey {
         static let exportJPEGQualityPercent = "editor.exportJPEGQualityPercent"
+        static let autoModeEnabled = "editor.autoModeEnabled"
+        static let autoModePreset = "editor.autoModePreset"
     }
 
     @Published var step: EditorStep = .source {
@@ -36,6 +38,16 @@ final class EditorViewModel: ObservableObject {
             if isPresetApplied {
                 applyEdits()
             }
+        }
+    }
+    @Published var autoModeEnabled: Bool = false {
+        didSet {
+            UserDefaults.standard.set(autoModeEnabled, forKey: PreferenceKey.autoModeEnabled)
+        }
+    }
+    @Published var autoModePreset: MoviePreset = .matrix {
+        didSet {
+            UserDefaults.standard.set(autoModePreset.rawValue, forKey: PreferenceKey.autoModePreset)
         }
     }
     @Published private(set) var isPresetApplied = false
@@ -113,6 +125,11 @@ final class EditorViewModel: ObservableObject {
         let normalizedJPEGQuality = Self.normalizedJPEGQualityPercent(storedJPEGQuality)
         exportJPEGQualityPercent = normalizedJPEGQuality
         UserDefaults.standard.set(normalizedJPEGQuality, forKey: PreferenceKey.exportJPEGQualityPercent)
+        autoModeEnabled = UserDefaults.standard.bool(forKey: PreferenceKey.autoModeEnabled)
+        if let storedAutoModePresetRawValue = UserDefaults.standard.string(forKey: PreferenceKey.autoModePreset),
+           let storedAutoModePreset = MoviePreset(rawValue: storedAutoModePresetRawValue) {
+            autoModePreset = storedAutoModePreset
+        }
 
         cameraServiceChangeCancellable = cameraService.objectWillChange
             .receive(on: DispatchQueue.main)
@@ -134,9 +151,12 @@ final class EditorViewModel: ObservableObject {
     }
 
     func captureFromCamera() {
-        guard cameraService.isSessionRunning else { return }
+        guard cameraService.isSessionRunning, !isSavingToLibrary else { return }
         statusMessage = nil
-        showPresetLoading = true
+        if autoModeEnabled {
+            beginSaveOperation()
+        }
+        showPresetLoading = !autoModeEnabled
         cameraService.capturePhoto()
     }
 
@@ -260,14 +280,7 @@ final class EditorViewModel: ObservableObject {
 
     func saveToLibrary() {
         guard !isSavingToLibrary else { return }
-        saveConfirmationTask?.cancel()
-        statusMessage = nil
-        saveProgress = 0.08
-        saveOverlayShownAt = Date()
-        withAnimation(.easeInOut(duration: 0.18)) {
-            showSaveConfirmation = false
-            isSavingToLibrary = true
-        }
+        beginSaveOperation()
 
         Task { [weak self] in
             guard let self else { return }
@@ -283,6 +296,17 @@ final class EditorViewModel: ObservableObject {
 
             self.saveProgress = 0.2
             self.saveExportResourceToLibrary(exportResource)
+        }
+    }
+
+    private func beginSaveOperation() {
+        saveConfirmationTask?.cancel()
+        statusMessage = nil
+        saveProgress = 0.08
+        saveOverlayShownAt = Date()
+        withAnimation(.easeInOut(duration: 0.18)) {
+            showSaveConfirmation = false
+            isSavingToLibrary = true
         }
     }
 
@@ -361,6 +385,11 @@ final class EditorViewModel: ObservableObject {
     }
 
     private func handleCameraCaptureResult(_ result: CameraCaptureResult) {
+        if autoModeEnabled {
+            handleAutoModeCaptureResult(result)
+            return
+        }
+
         if let processedData = result.processedData,
            let image = UIImage(data: processedData) {
             // Pure RAW capture can look overexposed when developed via CIRAWFilter.
@@ -378,6 +407,63 @@ final class EditorViewModel: ObservableObject {
 
         showPresetLoading = false
         statusMessage = "Photo capture failed."
+    }
+
+    private func handleAutoModeCaptureResult(_ result: CameraCaptureResult) {
+        showPresetLoading = false
+        if !isSavingToLibrary {
+            beginSaveOperation()
+        }
+
+        Task { [weak self] in
+            guard let self else { return }
+            await Task.yield()
+
+            guard let exportResource = self.makeAutoModeExportResource(from: result) else {
+                self.saveProgress = 0.0
+                await self.completeSaveOperation(success: false, errorMessage: "Photo capture failed.")
+                return
+            }
+
+            self.saveProgress = max(self.saveProgress, 0.2)
+            self.saveExportResourceToLibrary(exportResource)
+        }
+    }
+
+    private func makeAutoModeExportResource(from result: CameraCaptureResult) -> (data: Data, uniformTypeIdentifier: String)? {
+        let inputImage: CIImage
+        if cameraService.captureFormat != .pureRAW,
+           let rawData = result.rawData,
+           let rawCIImage = makeCIImageFromRAWData(rawData) {
+            inputImage = rawCIImage
+        } else if let processedData = result.processedData,
+                  let processedCIImage = CIImage(data: processedData, options: [.applyOrientationProperty: true]) {
+            inputImage = processedCIImage
+        } else if let rawData = result.rawData,
+                  let rawCIImage = makeCIImageFromRAWData(rawData) {
+            inputImage = rawCIImage
+        } else {
+            return nil
+        }
+
+        let outputImage = EditorViewModel.applyFilterChainStatic(
+            to: inputImage,
+            preset: autoModePreset,
+            applyPreset: true,
+            exposure: 0.0,
+            contrast: 0.0,
+            shadows: 0.0,
+            highlights: 0.0,
+            cropOption: .original,
+            cropOffset: .zero
+        )
+
+        guard let cgImage = ciContext.createCGImage(outputImage, from: outputImage.extent.integral) else {
+            return nil
+        }
+
+        let renderedImage = UIImage(cgImage: cgImage)
+        return makeBestQualityJPEGResource(from: renderedImage)
     }
 
     private func makeCIImageFromRAWData(_ data: Data) -> CIImage? {

@@ -111,12 +111,12 @@ struct ContentView: View {
         let previewHeight = previewHeight(for: proxy.size, isPhysicalLandscape: isPhysicalLandscape)
 
         VStack(spacing: 10) {
-            // Header with local padding
-            VStack(spacing: 10) {
-                TitleBlock(showSettings: $showSettings)
-                StepHeader(step: viewModel.step)
-            }
-            .padding(.horizontal, 14)
+                // Header with local padding
+                VStack(spacing: 10) {
+                    TitleBlock(showSettings: $showSettings, pickerItem: $viewModel.pickerItem)
+                    StepHeader(step: viewModel.step)
+                }
+                .padding(.horizontal, 14)
 
             // Preview Area
             PreviewArea(

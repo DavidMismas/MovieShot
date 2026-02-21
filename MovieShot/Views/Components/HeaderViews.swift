@@ -1,7 +1,9 @@
 import SwiftUI
+import PhotosUI
 
 struct TitleBlock: View {
     @Binding var showSettings: Bool
+    @Binding var pickerItem: PhotosPickerItem?
     
     private let cinemaAmber = Color(red: 0.96, green: 0.69, blue: 0.27)
     
@@ -16,11 +18,18 @@ struct TitleBlock: View {
                     .foregroundStyle(.white.opacity(0.75))
             }
             Spacer()
+            PhotosPicker(selection: $pickerItem, matching: .images) {
+                Image(systemName: "photo.stack.fill")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+            }
+            .buttonStyle(.plain)
+
             Button {
                 showSettings = true
             } label: {
                 Image(systemName: "gearshape.fill")
-                    .font(.system(size: 24, weight: .semibold))
+                .font(.system(size: 24, weight: .semibold))
                     .foregroundStyle(cinemaAmber)
             }
         }
