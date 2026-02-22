@@ -43,6 +43,7 @@ final class CameraService: NSObject, ObservableObject {
         static let hapticsEnabled = "camera.hapticsEnabled"
         static let shutterSoundEnabled = "camera.shutterSoundEnabled"
         static let captureFormat = "camera.captureFormat"
+        static let saveOriginalDNGEnabled = "camera.saveOriginalDNGEnabled"
         static let exposureControlEnabled = "camera.exposureControlEnabled"
         static let exposureBias = "camera.exposureBias"
         static let legacyAppleProRAWEnabled = "camera.appleProRAWEnabled"
@@ -77,6 +78,11 @@ final class CameraService: NSObject, ObservableObject {
         didSet {
             UserDefaults.standard.set(captureFormat.rawValue, forKey: PreferenceKey.captureFormat)
             refreshCaptureConfigurationForCurrentFormat()
+        }
+    }
+    @Published var saveOriginalDNGEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(saveOriginalDNGEnabled, forKey: PreferenceKey.saveOriginalDNGEnabled)
         }
     }
     @Published var exposureControlEnabled: Bool {
@@ -152,6 +158,7 @@ final class CameraService: NSObject, ObservableObject {
         )
         self.hapticsEnabled = UserDefaults.standard.object(forKey: PreferenceKey.hapticsEnabled) as? Bool ?? true
         self.shutterSoundEnabled = UserDefaults.standard.object(forKey: PreferenceKey.shutterSoundEnabled) as? Bool ?? true
+        self.saveOriginalDNGEnabled = UserDefaults.standard.object(forKey: PreferenceKey.saveOriginalDNGEnabled) as? Bool ?? false
         self.exposureControlEnabled = UserDefaults.standard.object(forKey: PreferenceKey.exposureControlEnabled) as? Bool ?? true
         let storedExposureBias = UserDefaults.standard.object(forKey: PreferenceKey.exposureBias) as? Double ?? 0.0
         self.exposureBias = Float(storedExposureBias)

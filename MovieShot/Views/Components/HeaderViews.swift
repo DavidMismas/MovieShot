@@ -3,6 +3,7 @@ import PhotosUI
 
 struct TitleBlock: View {
     @Binding var showSettings: Bool
+    @Binding var showBatchEdit: Bool
     @Binding var pickerItem: PhotosPickerItem?
     
     private let cinemaAmber = Color(red: 0.96, green: 0.69, blue: 0.27)
@@ -18,6 +19,16 @@ struct TitleBlock: View {
                     .foregroundStyle(.white.opacity(0.75))
             }
             Spacer()
+
+            Button {
+                showBatchEdit = true
+            } label: {
+                Image(systemName: "square.stack.3d.up.fill")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+            }
+            .buttonStyle(.plain)
+
             PhotosPicker(selection: $pickerItem, matching: .images) {
                 Image(systemName: "photo.stack.fill")
                     .font(.system(size: 22, weight: .semibold))

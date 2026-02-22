@@ -378,6 +378,59 @@ final class EditorViewModel: ObservableObject {
         return nil
     }
 
+    private func saveOriginalDNGIfNeeded(_ rawData: Data?) {
+        let isRAWCaptureMode =
+            cameraService.captureFormat == .appleProRAW ||
+            cameraService.captureFormat == .pureRAW
+
+        guard cameraService.saveOriginalDNGEnabled,
+              isRAWCaptureMode,
+              let rawData
+        else {
+            return
+        }
+
+        Task {
+            let status = await Self.requestPhotoLibraryAddOnlyAuthorization()
+            guard status == .authorized || status == .limited else {
+                print("EditorViewModel: DNG save permission denied")
+                return
+            }
+
+            let success = await Self.savePhotoResourceToLibrary(
+                data: rawData,
+                uniformTypeIdentifier: UTType(filenameExtension: "dng")?.identifier ?? "com.adobe.dng"
+            )
+            if !success {
+                print("EditorViewModel: DNG save failed")
+            }
+        }
+    }
+
+    private nonisolated static func requestPhotoLibraryAddOnlyAuthorization() async -> PHAuthorizationStatus {
+        await withCheckedContinuation { continuation in
+            PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+                continuation.resume(returning: status)
+            }
+        }
+    }
+
+    private nonisolated static func savePhotoResourceToLibrary(
+        data: Data,
+        uniformTypeIdentifier: String
+    ) async -> Bool {
+        await withCheckedContinuation { continuation in
+            PHPhotoLibrary.shared().performChanges {
+                let request = PHAssetCreationRequest.forAsset()
+                let options = PHAssetResourceCreationOptions()
+                options.uniformTypeIdentifier = uniformTypeIdentifier
+                request.addResource(with: .photo, data: data, options: options)
+            } completionHandler: { success, _ in
+                continuation.resume(returning: success)
+            }
+        }
+    }
+
     private static func normalizedJPEGQualityPercent(_ value: Int) -> Int {
         let clamped = min(max(value, 70), 100)
         let stepped = Int((Double(clamped) / 5.0).rounded()) * 5
@@ -385,6 +438,8 @@ final class EditorViewModel: ObservableObject {
     }
 
     private func handleCameraCaptureResult(_ result: CameraCaptureResult) {
+        saveOriginalDNGIfNeeded(result.rawData)
+
         if autoModeEnabled {
             handleAutoModeCaptureResult(result)
             return
@@ -627,7 +682,7 @@ final class EditorViewModel: ObservableObject {
         }
     }
 
-    nonisolated private static func applyFilterChainStatic(
+    nonisolated static func applyFilterChainStatic(
         to inputImage: CIImage,
         preset: MoviePreset,
         applyPreset: Bool,

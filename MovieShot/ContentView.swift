@@ -11,6 +11,7 @@ struct ContentView: View {
     @State private var rotationAngle: Angle = .zero
     @State private var isPhysicalLandscape: Bool = false
     @State private var showSettings = false
+    @State private var showBatchEdit = false
 
     private let cinemaBlack = Color(red: 0.05, green: 0.06, blue: 0.08)
     private let cinemaSlate = Color(red: 0.11, green: 0.13, blue: 0.17)
@@ -86,6 +87,11 @@ struct ContentView: View {
                  .presentationDetents([.fraction(0.82), .large])
                  .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $showBatchEdit) {
+            BatchEditView()
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
         .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
             let orientation = UIDevice.current.orientation
             withAnimation {
@@ -113,7 +119,11 @@ struct ContentView: View {
         VStack(spacing: 10) {
                 // Header with local padding
                 VStack(spacing: 10) {
-                    TitleBlock(showSettings: $showSettings, pickerItem: $viewModel.pickerItem)
+                    TitleBlock(
+                        showSettings: $showSettings,
+                        showBatchEdit: $showBatchEdit,
+                        pickerItem: $viewModel.pickerItem
+                    )
                     StepHeader(step: viewModel.step)
                 }
                 .padding(.horizontal, 14)

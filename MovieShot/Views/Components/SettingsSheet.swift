@@ -13,7 +13,7 @@ struct SettingsSheet: View {
     private let cinemaSlate = Color(red: 0.11, green: 0.13, blue: 0.17)
     private let panelBackground = Color.black.opacity(0.28)
 
-    private var autoModeBinding: Binding<Bool> {
+    private var fastModeBinding: Binding<Bool> {
         Binding(
             get: { viewModel.autoModeEnabled },
             set: { newValue in
@@ -119,7 +119,7 @@ struct SettingsSheet: View {
                             .tint(cinemaAmber)
 
                         VStack(alignment: .leading, spacing: 8) {
-                            Toggle("Auto Mode", isOn: autoModeBinding)
+                            Toggle("Fast Mode", isOn: fastModeBinding)
                                 .tint(cinemaAmber)
 
                             Menu {
@@ -141,7 +141,7 @@ struct SettingsSheet: View {
                                 }
                             } label: {
                                 HStack {
-                                    Text("Auto Preset")
+                                    Text("Fast Preset")
                                     Spacer()
                                     Text(viewModel.autoModePreset.title)
                                         .foregroundStyle(cinemaTeal)
@@ -167,7 +167,7 @@ struct SettingsSheet: View {
                                 .fixedSize(horizontal: false, vertical: true)
 
                             if viewModel.autoModePreset.isProLocked && !store.isPro {
-                                Text("Selected Auto preset requires Pro.")
+                                Text("Selected Fast preset requires Pro.")
                                     .font(.caption)
                                     .foregroundStyle(cinemaAmber)
                             }
@@ -181,6 +181,19 @@ struct SettingsSheet: View {
                                 }
                             }
                             .pickerStyle(.segmented)
+
+                            Toggle("Save Original DNG (RAW)", isOn: $cameraService.saveOriginalDNGEnabled)
+                                .tint(cinemaAmber)
+
+                            Text("In ProRAW/Pure RAW mode, each capture also saves the untouched DNG to Gallery.")
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.65))
+
+                            if cameraService.captureFormat == .jpg {
+                                Text("Switch capture format to ProRAW or Pure RAW to enable DNG output.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.white.opacity(0.55))
+                            }
                         }
 
                         VStack(alignment: .leading, spacing: 8) {
