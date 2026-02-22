@@ -888,8 +888,8 @@ final class EditorViewModel: ObservableObject {
 
             let controls = CIFilter.colorControls()
             controls.inputImage = output
-            controls.saturation = 1.06
-            controls.contrast = 1.04
+            controls.saturation = 1.26
+            controls.contrast = 1.07
             controls.brightness = 0.0
             output = controls.outputImage ?? output
 
