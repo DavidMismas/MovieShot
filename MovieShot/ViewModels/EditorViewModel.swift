@@ -1838,10 +1838,17 @@ final class EditorViewModel: ObservableObject {
                     let s = maxC > 0.001 ? delta / maxC : 0
                     let v = maxC
 
-                    // Ultra-tight red hue: ≈ ±8° around 0°/360° — only pure crimson/blood red
-                    let isRedHue = h <= 0.022 || h >= 0.978
-                    // Very high saturation: must be vivid saturated red (blood, lipstick)
-                    let isRed = isRedHue && s > 0.80 && v > 0.20
+                    // Ultra-tight red hue: ≈ ±5° around 0°/360°
+                    let isRedHue = h <= 0.014 || h >= 0.986
+                    // Keep only highly saturated, vivid pixels.
+                    let hasStrongChroma = s > 0.86 && v > 0.18
+                    // Orange/skin rejection: true red must dominate green and blue channels.
+                    let maxSecondary = Swift.max(g, b)
+                    let redDominance = r - maxSecondary
+                    let redOverGreen = r / Swift.max(g, 0.001)
+                    let redOverBlue = r / Swift.max(b, 0.001)
+                    let isPureRed = redDominance > 0.33 && redOverGreen > 1.55 && redOverBlue > 1.45
+                    let isRed = isRedHue && hasStrongChroma && isPureRed
 
                     let mask: Float = isRed ? 1.0 : 0.0
                     let idx = (bi * size * size + gi * size + ri) * 4
