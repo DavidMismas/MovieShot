@@ -39,6 +39,8 @@ enum CameraCaptureFormat: String, CaseIterable, Identifiable {
 }
 
 final class CameraService: NSObject, ObservableObject {
+    private static let uiExposureBiasLimit: Float = 3.0
+
     private enum PreferenceKey {
         static let hapticsEnabled = "camera.hapticsEnabled"
         static let shutterSoundEnabled = "camera.shutterSoundEnabled"
@@ -61,7 +63,7 @@ final class CameraService: NSObject, ObservableObject {
     @Published private(set) var pureRAWSupported = false
     @Published private(set) var pureRAWActive = false
     @Published private(set) var exposureControlSupported = false
-    @Published private(set) var exposureBiasRange: ClosedRange<Float> = -2.0...2.0
+    @Published private(set) var exposureBiasRange: ClosedRange<Float> = -uiExposureBiasLimit...uiExposureBiasLimit
     @Published private(set) var focusPointSupported = false
     @Published private(set) var focusLocked = false
     @Published var hapticsEnabled: Bool {
@@ -288,7 +290,7 @@ final class CameraService: NSObject, ObservableObject {
             // Configure initial input separately (has its own begin/commit)
             let initialPosition: AVCaptureDevice.Position = .back
             let lenses = self.reloadLenses(for: initialPosition)
-            self.configureInput(for: lenses.first)
+            self.configureInput(for: self.preferredDefaultLens(for: initialPosition, in: lenses))
 
             DispatchQueue.main.async {
                 self.currentPosition = initialPosition
@@ -321,7 +323,7 @@ final class CameraService: NSObject, ObservableObject {
             guard let self else { return }
             let newPosition: AVCaptureDevice.Position = self.currentPosition == .back ? .front : .back
             let lenses = self.reloadLenses(for: newPosition)
-            self.configureInput(for: lenses.first)
+            self.configureInput(for: self.preferredDefaultLens(for: newPosition, in: lenses))
             DispatchQueue.main.async {
                 self.currentPosition = newPosition
             }
@@ -409,6 +411,18 @@ final class CameraService: NSObject, ObservableObject {
         }
 
         if captureFormat != .pureRAW {
+            // Digital crop lens on the Ultra Wide camera (14mm -> ~20mm).
+            if position == .back, uniqueDevices.contains(where: { $0.deviceType == .builtInUltraWideCamera }) {
+                lenses.append(CameraLens(
+                    id: "\(position.rawValue)-ultra-1.43x",
+                    name: "20mm",
+                    deviceType: .builtInUltraWideCamera,
+                    position: position,
+                    zoomFactor: 20.0 / 14.0,
+                    sortOrder: 20
+                ))
+            }
+
             // Digital crop lenses on the wide-angle camera
             if position == .back, uniqueDevices.contains(where: { $0.deviceType == .builtInWideAngleCamera }) {
                 lenses.append(CameraLens(
@@ -417,7 +431,7 @@ final class CameraService: NSObject, ObservableObject {
                     deviceType: .builtInWideAngleCamera,
                     position: position,
                     zoomFactor: 1.5,
-                    sortOrder: 10
+                    sortOrder: 35
                 ))
                 lenses.append(CameraLens(
                     id: "\(position.rawValue)-wide-2x",
@@ -425,7 +439,7 @@ final class CameraService: NSObject, ObservableObject {
                     deviceType: .builtInWideAngleCamera,
                     position: position,
                     zoomFactor: 2.0,
-                    sortOrder: 15
+                    sortOrder: 50
                 ))
             }
 
@@ -437,7 +451,7 @@ final class CameraService: NSObject, ObservableObject {
                     deviceType: .builtInTelephotoCamera,
                     position: position,
                     zoomFactor: 2.0,
-                    sortOrder: 25
+                    sortOrder: 80
                 ))
             }
         }
@@ -451,6 +465,12 @@ final class CameraService: NSObject, ObservableObject {
             self.availableLenses = sorted
         }
         return sorted
+    }
+
+    private func preferredDefaultLens(for position: AVCaptureDevice.Position, in lenses: [CameraLens]) -> CameraLens? {
+        guard position == .back else { return lenses.first }
+        return lenses.first(where: { $0.deviceType == .builtInWideAngleCamera && abs($0.zoomFactor - 1.0) < 0.0001 })
+            ?? lenses.first
     }
 
     private func configureInput(for lens: CameraLens?) {
@@ -608,7 +628,18 @@ final class CameraService: NSObject, ObservableObject {
         let minBias = Float(device.minExposureTargetBias)
         let maxBias = Float(device.maxExposureTargetBias)
         let supported = maxBias - minBias > 0.0001
-        let range: ClosedRange<Float> = supported ? minBias...maxBias : -2.0...2.0
+        let range: ClosedRange<Float>
+        if supported {
+            let clampedMin = max(minBias, -Self.uiExposureBiasLimit)
+            let clampedMax = min(maxBias, Self.uiExposureBiasLimit)
+            if clampedMax - clampedMin > 0.0001 {
+                range = clampedMin...clampedMax
+            } else {
+                range = minBias...maxBias
+            }
+        } else {
+            range = -Self.uiExposureBiasLimit...Self.uiExposureBiasLimit
+        }
 
         DispatchQueue.main.async {
             self.exposureControlSupported = supported
@@ -632,8 +663,11 @@ final class CameraService: NSObject, ObservableObject {
         let minBias = Float(device.minExposureTargetBias)
         let maxBias = Float(device.maxExposureTargetBias)
         guard maxBias - minBias > 0.0001 else { return }
-
-        let clamped = min(max(bias, minBias), maxBias)
+        let uiMin = max(minBias, -Self.uiExposureBiasLimit)
+        let uiMax = min(maxBias, Self.uiExposureBiasLimit)
+        let lowerBound = uiMax - uiMin > 0.0001 ? uiMin : minBias
+        let upperBound = uiMax - uiMin > 0.0001 ? uiMax : maxBias
+        let clamped = min(max(bias, lowerBound), upperBound)
         do {
             try device.lockForConfiguration()
             if device.isExposureModeSupported(.continuousAutoExposure) {
@@ -673,9 +707,9 @@ final class CameraService: NSObject, ObservableObject {
     private func lensInfo(for type: AVCaptureDevice.DeviceType, position: AVCaptureDevice.Position) -> (name: String, sortOrder: Int) {
         if position == .front { return ("Front", 0) }
         switch type {
-        case .builtInUltraWideCamera: return ("14mm", 5)
-        case .builtInWideAngleCamera: return ("24mm", 0)  // sortOrder 0 = default first lens
-        case .builtInTelephotoCamera: return ("Tele", 20)
+        case .builtInUltraWideCamera: return ("14mm", 14)
+        case .builtInWideAngleCamera: return ("24mm", 24)
+        case .builtInTelephotoCamera: return ("Tele", 70)
         default: return ("Camera", 50)
         }
     }

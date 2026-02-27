@@ -3,6 +3,7 @@ internal import AVFoundation
 
 struct PreviewArea: View {
     @ObservedObject var viewModel: EditorViewModel
+    @EnvironmentObject var store: StoreService
     let isLandscape: Bool
     @Binding var cropDragStart: CGSize
     @Binding var rotationAngle: Angle
@@ -13,6 +14,7 @@ struct PreviewArea: View {
     @State private var focusIndicatorOpacity: Double = 0.0
     @State private var focusIndicatorHideWorkItem: DispatchWorkItem?
     @State private var showExposureSlider = false
+    @State private var showPurchaseView = false
 
     private let cinemaAmber = Color(red: 0.96, green: 0.69, blue: 0.27)
     private let panelBackground = Color.black.opacity(0.28)
@@ -51,6 +53,10 @@ struct PreviewArea: View {
                 .stroke(.white.opacity(0.2), lineWidth: 1)
         )
         .background(panelBackground)
+        .sheet(isPresented: $showPurchaseView) {
+            PurchaseView()
+                .environmentObject(store)
+        }
     }
 
     private var canShowBeforeAfter: Bool {
@@ -153,47 +159,69 @@ struct PreviewArea: View {
                     .position(x: focusIndicatorPoint.x, y: focusIndicatorPoint.y)
             }
         }
-        .overlay(alignment: .bottomLeading) {
+        .overlay(alignment: .bottomTrailing) {
             if viewModel.cameraService.exposureControlEnabled,
                viewModel.cameraService.exposureControlSupported {
                 exposureControlDock
-                    .padding(.leading, 10)
-                    .padding(.bottom, 18)
+                    .padding(.trailing, 6)
+                    .padding(.bottom, 8)
             }
         }
-        .overlay(alignment: .bottomTrailing) {
+        .overlay(alignment: .bottomLeading) {
             if viewModel.autoModeEnabled {
-                fastPresetBadge
-                    .padding(10)
+                fastPresetPickerBadge
+                    .padding(.leading, 10)
+                    .padding(.bottom, 10)
             }
         }
         .clipped()
     }
 
-    private var fastPresetBadge: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "bolt.fill")
-                .font(.caption2.weight(.semibold))
-            Text(viewModel.autoModePreset.title)
-                .font(.caption2.weight(.semibold))
-                .lineLimit(1)
+    private var fastPresetPickerBadge: some View {
+        Menu {
+            ForEach(MoviePreset.allCases) { preset in
+                let locked = preset.isProLocked && !store.isPro
+                Button {
+                    if locked {
+                        showPurchaseView = true
+                    } else {
+                        viewModel.autoModePreset = preset
+                    }
+                } label: {
+                    if viewModel.autoModePreset == preset {
+                        Label(locked ? "\(preset.title) - Pro" : preset.title, systemImage: "checkmark")
+                    } else {
+                        Text(locked ? "\(preset.title) - Pro" : preset.title)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "bolt.fill")
+                    .font(.caption2.weight(.semibold))
+                Text(viewModel.autoModePreset.title)
+                    .font(.caption2.weight(.semibold))
+                    .lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.7))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(.black.opacity(0.45), in: Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(.white.opacity(0.24), lineWidth: 1)
+            )
         }
-        .foregroundStyle(.white)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(.black.opacity(0.45), in: Capsule())
-        .overlay(
-            Capsule()
-                .stroke(.white.opacity(0.24), lineWidth: 1)
-        )
     }
 
     private var exposureControlDock: some View {
-        HStack(alignment: .bottom, spacing: 8) {
+        VStack(alignment: .trailing, spacing: 8) {
             if showExposureSlider {
                 verticalExposureSlider
-                    .padding(.bottom, 14)
-                    .transition(.move(edge: .leading).combined(with: .opacity))
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
             Button {
@@ -202,12 +230,13 @@ struct PreviewArea: View {
                 }
             } label: {
                 Image(systemName: showExposureSlider ? "slider.vertical.3" : "sun.max.fill")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(width: 34, height: 34)
+                    .font(.headline.weight(.semibold))
+                    .frame(width: 48, height: 48)
             }
             .buttonStyle(.plain)
             .foregroundStyle(.white.opacity(0.92))
-            .background(.black.opacity(0.42), in: Circle())
+            .contentShape(Circle())
+            .background(.black.opacity(0.46), in: Circle())
             .overlay(
                 Circle()
                     .stroke(.white.opacity(0.2), lineWidth: 1)
@@ -218,12 +247,12 @@ struct PreviewArea: View {
     private var verticalExposureSlider: some View {
         VStack(spacing: 0) {
             Text("\(viewModel.cameraService.exposureBias, specifier: "%+.1f") EV")
-                .font(.caption2.weight(.semibold))
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(.white.opacity(0.92))
                 .monospacedDigit()
-                .padding(.top, 3)
+                .padding(.top, 4)
 
-            Spacer(minLength: 10)
+            Spacer(minLength: 12)
 
             Slider(
                 value: Binding(
@@ -234,30 +263,41 @@ struct PreviewArea: View {
                 step: 0.1
             )
             .rotationEffect(.degrees(-90))
-            .frame(width: 124, height: 20)
-            .controlSize(.mini)
+            .frame(width: 168, height: 30)
+            .controlSize(.regular)
             .tint(cinemaAmber)
 
-            Spacer(minLength: 8)
+            Spacer(minLength: 10)
 
             Button {
                 viewModel.cameraService.resetExposureBias()
             } label: {
                 Label("Reset", systemImage: "arrow.counterclockwise")
-                    .font(.caption2.weight(.semibold))
+                    .font(.caption.weight(.semibold))
+                    .frame(maxWidth: .infinity, minHeight: 34)
+                    .padding(.horizontal, 10)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(.white.opacity(0.08))
+                    )
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .stroke(.white.opacity(0.14), lineWidth: 1)
+                    )
             }
             .buttonStyle(.plain)
             .foregroundStyle(.white.opacity(0.9))
             .opacity(abs(viewModel.cameraService.exposureBias) > 0.05 ? 1 : 0.45)
             .disabled(abs(viewModel.cameraService.exposureBias) <= 0.05)
-            .padding(.bottom, 2)
+            .padding(.horizontal, 2)
+            .padding(.bottom, 4)
         }
-        .frame(width: 68, height: 196)
+        .frame(width: 88, height: 246)
         .padding(.horizontal, 8)
-        .padding(.vertical, 10)
-        .background(.black.opacity(0.42), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.vertical, 12)
+        .background(.black.opacity(0.46), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(.white.opacity(0.2), lineWidth: 1)
         )
     }

@@ -226,6 +226,11 @@ struct BatchEditView: View {
         case .orderOfPhoenix: return "wand.and.stars"
         case .hero: return "seal.fill"
         case .laLaLand: return "music.note"
+        case .blockbusterTealOrange: return "theatermasks.fill"
+        case .metroNeonNight: return "sparkles.rectangle.stack.fill"
+        case .noirTealGlow: return "moon.stars.fill"
+        case .urbanWarmCool: return "building.2.fill"
+        case .electricDusk: return "bolt.fill"
         }
     }
 }

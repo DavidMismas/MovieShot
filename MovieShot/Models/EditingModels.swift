@@ -79,6 +79,11 @@ enum MoviePreset: String, CaseIterable, Identifiable {
     case orderOfPhoenix
     case hero
     case laLaLand
+    case blockbusterTealOrange
+    case metroNeonNight
+    case noirTealGlow
+    case urbanWarmCool
+    case electricDusk
 
     var id: String { rawValue }
 
@@ -101,6 +106,11 @@ enum MoviePreset: String, CaseIterable, Identifiable {
         case .orderOfPhoenix: return "Dark Order"
         case .hero: return "Ying Xiong"
         case .laLaLand: return "La La"
+        case .blockbusterTealOrange: return "Blockbuster T&O"
+        case .metroNeonNight: return "Metro Neon"
+        case .noirTealGlow: return "Noir Teal Glow"
+        case .urbanWarmCool: return "Urban Warm/Cool"
+        case .electricDusk: return "Electric Dusk"
         }
     }
 
@@ -131,6 +141,11 @@ enum MoviePreset: String, CaseIterable, Identifiable {
         case .orderOfPhoenix: return "Blue-teal cast, crushed shadows, dark desat"
         case .hero: return "Vivid saturated primaries, epic color contrast"
         case .laLaLand: return "Pastel dreamscape, warm magic hour, soft grain"
+        case .blockbusterTealOrange: return "Modern teal-orange split, clean cinematic punch"
+        case .metroNeonNight: return "Cyber city night, neon cyan-magenta with amber glow"
+        case .noirTealGlow: return "Moody noir, deep tones, restrained color, teal bias"
+        case .urbanWarmCool: return "Subtle city split-tone, natural and filmic everyday look"
+        case .electricDusk: return "Blue-hour atmosphere, electric shadows, sunset highlights"
         }
     }
 }

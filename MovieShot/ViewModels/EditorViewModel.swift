@@ -749,8 +749,10 @@ final class EditorViewModel: ObservableObject {
 
     nonisolated private static func subtleFilmContrast(for preset: MoviePreset) -> CGFloat {
         switch preset {
-        case .studioClean, .daylightRun:
+        case .studioClean, .daylightRun, .urbanWarmCool:
             return 1.015
+        case .blockbusterTealOrange:
+            return 1.02
         default:
             return 1.03
         }
@@ -767,6 +769,14 @@ final class EditorViewModel: ObservableObject {
         return controls.outputImage ?? image
     }
 
+    nonisolated private static func applyVibrance(to image: CIImage, amount: CGFloat) -> CIImage {
+        guard abs(amount) > 0.0001 else { return image }
+        guard let vibrance = CIFilter(name: "CIVibrance") else { return image }
+        vibrance.setValue(image, forKey: kCIInputImageKey)
+        vibrance.setValue(amount, forKey: "inputAmount")
+        return vibrance.outputImage ?? image
+    }
+
     private struct FlatBaselineSettings {
         let shadowLift: CGFloat
         let highlightRollOff: CGFloat
@@ -776,16 +786,16 @@ final class EditorViewModel: ObservableObject {
 
     nonisolated private static func flatBaselineSettings(for preset: MoviePreset) -> FlatBaselineSettings {
         switch preset {
-        case .sinCity, .theBatman, .drive, .madMax, .seven, .orderOfPhoenix:
+        case .sinCity, .theBatman, .drive, .madMax, .seven, .orderOfPhoenix, .metroNeonNight, .noirTealGlow:
             // Dark presets need a larger toe lift so blacks stay editable.
             return FlatBaselineSettings(shadowLift: 0.26, highlightRollOff: 0.96, blackLift: 0.032, contrast: 1.00)
-        case .studioClean:
+        case .studioClean, .urbanWarmCool:
             // Keep a gentle toe so blacks never collapse.
             return FlatBaselineSettings(shadowLift: 0.22, highlightRollOff: 0.99, blackLift: 0.030, contrast: 1.01)
-        case .daylightRun:
+        case .daylightRun, .electricDusk:
             // Film-inspired but still lifted in shadows (no crushed blacks).
             return FlatBaselineSettings(shadowLift: 0.20, highlightRollOff: 0.97, blackLift: 0.026, contrast: 1.04)
-        case .matrix, .bladeRunner2049, .dune, .revenant, .hero:
+        case .matrix, .bladeRunner2049, .dune, .revenant, .hero, .blockbusterTealOrange:
             return FlatBaselineSettings(shadowLift: 0.20, highlightRollOff: 0.97, blackLift: 0.024, contrast: 1.03)
         default:
             return FlatBaselineSettings(shadowLift: 0.14, highlightRollOff: 0.98, blackLift: 0.018, contrast: 1.06)
@@ -839,11 +849,11 @@ final class EditorViewModel: ObservableObject {
 
     nonisolated private static func shadowProtectionSettings(for preset: MoviePreset) -> ShadowProtectionSettings {
         switch preset {
-        case .matrix, .sinCity, .theBatman, .dune, .drive, .madMax, .seven, .orderOfPhoenix, .hero:
+        case .matrix, .sinCity, .theBatman, .dune, .drive, .madMax, .seven, .orderOfPhoenix, .hero, .metroNeonNight, .noirTealGlow:
             return ShadowProtectionSettings(toeLift: 0.032, shadowRecovery: 0.16)
-        case .bladeRunner2049, .strangerThings, .revenant, .inTheMoodForLove, .vertigo, .laLaLand:
+        case .bladeRunner2049, .strangerThings, .revenant, .inTheMoodForLove, .vertigo, .laLaLand, .blockbusterTealOrange, .electricDusk:
             return ShadowProtectionSettings(toeLift: 0.024, shadowRecovery: 0.12)
-        case .studioClean, .daylightRun:
+        case .studioClean, .daylightRun, .urbanWarmCool:
             return ShadowProtectionSettings(toeLift: 0.016, shadowRecovery: 0.08)
         }
     }
@@ -1041,8 +1051,8 @@ final class EditorViewModel: ObservableObject {
             // The Batman 2022: dark, desaturated, bleach bypass, teal shadows, crushed blacks
             let matrix = CIFilter.colorMatrix()
             matrix.inputImage = image
-            // Desaturate reds, cool skin tones
-            matrix.rVector = CIVector(x: 0.90, y: 0.07, z: 0.03, w: 0.0)
+            // Keep the same cool skin bias but preserve more red chroma.
+            matrix.rVector = CIVector(x: 0.98, y: 0.05, z: 0.02, w: 0.0)
             // Dusty greens, slight cross-contamination
             matrix.gVector = CIVector(x: 0.05, y: 0.92, z: 0.06, w: 0.0)
             // Suppress pure blue, create teal shadows via green bleed
@@ -1056,7 +1066,7 @@ final class EditorViewModel: ObservableObject {
             let controls = CIFilter.colorControls()
             controls.inputImage = output
             controls.saturation = 0.65
-            controls.contrast = 1.10
+            controls.contrast = 1.20
             controls.brightness = 0.0
             output = controls.outputImage ?? output
 
@@ -1455,6 +1465,211 @@ final class EditorViewModel: ObservableObject {
             shadowHighlight.shadowAmount = 0.10
             shadowHighlight.highlightAmount = 0.86
             return shadowHighlight.outputImage ?? output
+
+        case .blockbusterTealOrange:
+            // Modern blockbuster split tone: restrained teal shadows + orange highlights.
+            let matrix = CIFilter.colorMatrix()
+            matrix.inputImage = image
+            matrix.rVector = CIVector(x: 1.06, y: 0.05, z: 0.00, w: 0.0)
+            matrix.gVector = CIVector(x: 0.03, y: 0.95, z: 0.06, w: 0.0)
+            matrix.bVector = CIVector(x: 0.00, y: 0.14, z: 0.86, w: 0.0)
+            matrix.aVector = CIVector(x: 0.0, y: 0.0, z: 0.0, w: 1.0)
+            matrix.biasVector = CIVector(x: 0.010, y: 0.004, z: 0.006, w: 0.0)
+            var output = matrix.outputImage ?? image
+
+            let controls = CIFilter.colorControls()
+            controls.inputImage = output
+            controls.saturation = 0.94
+            controls.contrast = 1.12
+            controls.brightness = 0.006
+            output = controls.outputImage ?? output
+            output = applyVibrance(to: output, amount: 0.10)
+
+            if let toneCurve = CIFilter(name: "CIToneCurve") {
+                toneCurve.setValue(output, forKey: kCIInputImageKey)
+                toneCurve.setValue(CIVector(x: 0.00, y: 0.02), forKey: "inputPoint0")
+                toneCurve.setValue(CIVector(x: 0.25, y: 0.21), forKey: "inputPoint1")
+                toneCurve.setValue(CIVector(x: 0.50, y: 0.56), forKey: "inputPoint2")
+                toneCurve.setValue(CIVector(x: 0.75, y: 0.83), forKey: "inputPoint3")
+                toneCurve.setValue(CIVector(x: 1.00, y: 1.00), forKey: "inputPoint4")
+                output = toneCurve.outputImage ?? output
+            }
+
+            let temperature = CIFilter.temperatureAndTint()
+            temperature.inputImage = output
+            temperature.neutral = CIVector(x: 6500, y: 0)
+            temperature.targetNeutral = CIVector(x: 6200, y: 4)
+            output = temperature.outputImage ?? output
+
+            let shadowHighlight = CIFilter.highlightShadowAdjust()
+            shadowHighlight.inputImage = output
+            shadowHighlight.shadowAmount = -0.04
+            shadowHighlight.highlightAmount = 1.08
+            return shadowHighlight.outputImage ?? output
+
+        case .metroNeonNight:
+            // Urban night neon: cool base with magenta/cyan energy and amber highlights.
+            let matrix = CIFilter.colorMatrix()
+            matrix.inputImage = image
+            matrix.rVector = CIVector(x: 1.08, y: 0.03, z: 0.08, w: 0.0)
+            matrix.gVector = CIVector(x: 0.01, y: 0.85, z: 0.12, w: 0.0)
+            matrix.bVector = CIVector(x: 0.01, y: 0.18, z: 1.04, w: 0.0)
+            matrix.aVector = CIVector(x: 0.0, y: 0.0, z: 0.0, w: 1.0)
+            matrix.biasVector = CIVector(x: 0.012, y: -0.004, z: 0.016, w: 0.0)
+            var output = matrix.outputImage ?? image
+
+            let controls = CIFilter.colorControls()
+            controls.inputImage = output
+            controls.saturation = 1.08
+            controls.contrast = 1.18
+            controls.brightness = 0.0
+            output = controls.outputImage ?? output
+            output = applyVibrance(to: output, amount: 0.14)
+
+            if let toneCurve = CIFilter(name: "CIToneCurve") {
+                toneCurve.setValue(output, forKey: kCIInputImageKey)
+                toneCurve.setValue(CIVector(x: 0.00, y: 0.00), forKey: "inputPoint0")
+                toneCurve.setValue(CIVector(x: 0.25, y: 0.19), forKey: "inputPoint1")
+                toneCurve.setValue(CIVector(x: 0.50, y: 0.50), forKey: "inputPoint2")
+                toneCurve.setValue(CIVector(x: 0.75, y: 0.87), forKey: "inputPoint3")
+                toneCurve.setValue(CIVector(x: 1.00, y: 1.00), forKey: "inputPoint4")
+                output = toneCurve.outputImage ?? output
+            }
+
+            let temperature = CIFilter.temperatureAndTint()
+            temperature.inputImage = output
+            temperature.neutral = CIVector(x: 6500, y: 0)
+            temperature.targetNeutral = CIVector(x: 6900, y: 6)
+            output = temperature.outputImage ?? output
+
+            let shadowHighlight = CIFilter.highlightShadowAdjust()
+            shadowHighlight.inputImage = output
+            shadowHighlight.shadowAmount = -0.06
+            shadowHighlight.highlightAmount = 1.12
+            return shadowHighlight.outputImage ?? output
+
+        case .noirTealGlow:
+            // Cinematic noir: deeper blacks, restrained chroma, elegant teal shadow bias.
+            let matrix = CIFilter.colorMatrix()
+            matrix.inputImage = image
+            matrix.rVector = CIVector(x: 0.90, y: 0.05, z: 0.03, w: 0.0)
+            matrix.gVector = CIVector(x: 0.02, y: 0.92, z: 0.07, w: 0.0)
+            matrix.bVector = CIVector(x: 0.00, y: 0.14, z: 0.94, w: 0.0)
+            matrix.aVector = CIVector(x: 0.0, y: 0.0, z: 0.0, w: 1.0)
+            matrix.biasVector = CIVector(x: -0.003, y: 0.001, z: 0.010, w: 0.0)
+            var output = matrix.outputImage ?? image
+
+            let controls = CIFilter.colorControls()
+            controls.inputImage = output
+            controls.saturation = 0.82
+            controls.contrast = 1.22
+            controls.brightness = -0.005
+            output = controls.outputImage ?? output
+            output = applyVibrance(to: output, amount: -0.08)
+
+            if let toneCurve = CIFilter(name: "CIToneCurve") {
+                toneCurve.setValue(output, forKey: kCIInputImageKey)
+                toneCurve.setValue(CIVector(x: 0.00, y: 0.01), forKey: "inputPoint0")
+                toneCurve.setValue(CIVector(x: 0.25, y: 0.17), forKey: "inputPoint1")
+                toneCurve.setValue(CIVector(x: 0.50, y: 0.46), forKey: "inputPoint2")
+                toneCurve.setValue(CIVector(x: 0.75, y: 0.79), forKey: "inputPoint3")
+                toneCurve.setValue(CIVector(x: 1.00, y: 1.00), forKey: "inputPoint4")
+                output = toneCurve.outputImage ?? output
+            }
+
+            let temperature = CIFilter.temperatureAndTint()
+            temperature.inputImage = output
+            temperature.neutral = CIVector(x: 6500, y: 0)
+            temperature.targetNeutral = CIVector(x: 6750, y: 2)
+            output = temperature.outputImage ?? output
+
+            let shadowHighlight = CIFilter.highlightShadowAdjust()
+            shadowHighlight.inputImage = output
+            shadowHighlight.shadowAmount = -0.08
+            shadowHighlight.highlightAmount = 0.96
+            return shadowHighlight.outputImage ?? output
+
+        case .urbanWarmCool:
+            // Everyday city grade with subtle warm/cool separation and clean neutrality.
+            let matrix = CIFilter.colorMatrix()
+            matrix.inputImage = image
+            matrix.rVector = CIVector(x: 1.02, y: 0.03, z: 0.01, w: 0.0)
+            matrix.gVector = CIVector(x: 0.02, y: 0.99, z: 0.03, w: 0.0)
+            matrix.bVector = CIVector(x: 0.00, y: 0.08, z: 0.93, w: 0.0)
+            matrix.aVector = CIVector(x: 0.0, y: 0.0, z: 0.0, w: 1.0)
+            matrix.biasVector = CIVector(x: 0.007, y: 0.004, z: 0.004, w: 0.0)
+            var output = matrix.outputImage ?? image
+
+            let controls = CIFilter.colorControls()
+            controls.inputImage = output
+            controls.saturation = 0.96
+            controls.contrast = 1.08
+            controls.brightness = 0.004
+            output = controls.outputImage ?? output
+            output = applyVibrance(to: output, amount: 0.06)
+
+            if let toneCurve = CIFilter(name: "CIToneCurve") {
+                toneCurve.setValue(output, forKey: kCIInputImageKey)
+                toneCurve.setValue(CIVector(x: 0.00, y: 0.03), forKey: "inputPoint0")
+                toneCurve.setValue(CIVector(x: 0.25, y: 0.24), forKey: "inputPoint1")
+                toneCurve.setValue(CIVector(x: 0.50, y: 0.52), forKey: "inputPoint2")
+                toneCurve.setValue(CIVector(x: 0.75, y: 0.77), forKey: "inputPoint3")
+                toneCurve.setValue(CIVector(x: 1.00, y: 0.99), forKey: "inputPoint4")
+                output = toneCurve.outputImage ?? output
+            }
+
+            let temperature = CIFilter.temperatureAndTint()
+            temperature.inputImage = output
+            temperature.neutral = CIVector(x: 6500, y: 0)
+            temperature.targetNeutral = CIVector(x: 6320, y: 2)
+            output = temperature.outputImage ?? output
+
+            let shadowHighlight = CIFilter.highlightShadowAdjust()
+            shadowHighlight.inputImage = output
+            shadowHighlight.shadowAmount = 0.04
+            shadowHighlight.highlightAmount = 0.92
+            return shadowHighlight.outputImage ?? output
+
+        case .electricDusk:
+            // Blue-hour atmosphere with electric blues and warm sunset separation.
+            let matrix = CIFilter.colorMatrix()
+            matrix.inputImage = image
+            matrix.rVector = CIVector(x: 1.10, y: 0.05, z: 0.02, w: 0.0)
+            matrix.gVector = CIVector(x: 0.02, y: 0.95, z: 0.06, w: 0.0)
+            matrix.bVector = CIVector(x: 0.01, y: 0.16, z: 1.02, w: 0.0)
+            matrix.aVector = CIVector(x: 0.0, y: 0.0, z: 0.0, w: 1.0)
+            matrix.biasVector = CIVector(x: 0.010, y: 0.004, z: 0.014, w: 0.0)
+            var output = matrix.outputImage ?? image
+
+            let controls = CIFilter.colorControls()
+            controls.inputImage = output
+            controls.saturation = 1.06
+            controls.contrast = 1.14
+            controls.brightness = 0.008
+            output = controls.outputImage ?? output
+            output = applyVibrance(to: output, amount: 0.12)
+
+            if let toneCurve = CIFilter(name: "CIToneCurve") {
+                toneCurve.setValue(output, forKey: kCIInputImageKey)
+                toneCurve.setValue(CIVector(x: 0.00, y: 0.04), forKey: "inputPoint0")
+                toneCurve.setValue(CIVector(x: 0.25, y: 0.28), forKey: "inputPoint1")
+                toneCurve.setValue(CIVector(x: 0.50, y: 0.58), forKey: "inputPoint2")
+                toneCurve.setValue(CIVector(x: 0.75, y: 0.73), forKey: "inputPoint3")
+                toneCurve.setValue(CIVector(x: 1.00, y: 0.98), forKey: "inputPoint4")
+                output = toneCurve.outputImage ?? output
+            }
+
+            let temperature = CIFilter.temperatureAndTint()
+            temperature.inputImage = output
+            temperature.neutral = CIVector(x: 6500, y: 0)
+            temperature.targetNeutral = CIVector(x: 6380, y: 6)
+            output = temperature.outputImage ?? output
+
+            let shadowHighlight = CIFilter.highlightShadowAdjust()
+            shadowHighlight.inputImage = output
+            shadowHighlight.shadowAmount = 0.08
+            shadowHighlight.highlightAmount = 0.98
+            return shadowHighlight.outputImage ?? output
         }
     }
 
@@ -1586,6 +1801,56 @@ final class EditorViewModel: ObservableObject {
                 chromaticAberration: 0.0,
                 bloomIntensity: 0.18,
                 bloomRadius: 11.0
+            )
+        case .blockbusterTealOrange:
+            return FilmFinishSettings(
+                grainAmount: 0.08,
+                grainSize: 1.20,
+                vignetteStrength: 0.12,
+                vignetteSoftness: 0.80,
+                chromaticAberration: 0.0,
+                bloomIntensity: 0.06,
+                bloomRadius: 6.0
+            )
+        case .metroNeonNight:
+            return FilmFinishSettings(
+                grainAmount: 0.10,
+                grainSize: 0.95,
+                vignetteStrength: 0.16,
+                vignetteSoftness: 0.72,
+                chromaticAberration: 0.0,
+                bloomIntensity: 0.08,
+                bloomRadius: 7.0
+            )
+        case .noirTealGlow:
+            return FilmFinishSettings(
+                grainAmount: 0.12,
+                grainSize: 1.60,
+                vignetteStrength: 0.22,
+                vignetteSoftness: 0.64,
+                chromaticAberration: 0.0,
+                bloomIntensity: 0.0,
+                bloomRadius: 0.0
+            )
+        case .urbanWarmCool:
+            return FilmFinishSettings(
+                grainAmount: 0.06,
+                grainSize: 0.90,
+                vignetteStrength: 0.06,
+                vignetteSoftness: 0.86,
+                chromaticAberration: 0.0,
+                bloomIntensity: 0.02,
+                bloomRadius: 4.0
+            )
+        case .electricDusk:
+            return FilmFinishSettings(
+                grainAmount: 0.09,
+                grainSize: 1.20,
+                vignetteStrength: 0.14,
+                vignetteSoftness: 0.80,
+                chromaticAberration: 0.0,
+                bloomIntensity: 0.12,
+                bloomRadius: 8.0
             )
         default:
             return nil

@@ -10,6 +10,7 @@ struct PurchaseView: View {
     private let cinemaAmber = Color(red: 0.96, green: 0.69, blue: 0.27)
     private let cinemaTeal = Color(red: 0.22, green: 0.74, blue: 0.79)
 
+    private let allPresets: [MoviePreset] = MoviePreset.allCases
     private let proPresets: [MoviePreset] = MoviePreset.allCases.filter { $0.isProLocked }
 
     var body: some View {
@@ -33,7 +34,7 @@ struct PurchaseView: View {
                             .font(.title.bold())
                             .foregroundStyle(.white)
 
-                        Text("Unlock all \(proPresets.count) cinematic presets")
+                        Text("Unlock all \(allPresets.count) cinematic presets")
                             .font(.subheadline)
                             .foregroundStyle(.white.opacity(0.65))
                     }
@@ -41,7 +42,7 @@ struct PurchaseView: View {
 
                     // Pro preset grid
                     VStack(spacing: 8) {
-                        Text("Included in Pro")
+                        Text("Included in Pro (\(proPresets.count) premium presets)")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.white.opacity(0.5))
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -187,6 +188,11 @@ struct PurchaseView: View {
         case .orderOfPhoenix: return "wand.and.stars"
         case .hero: return "seal.fill"
         case .laLaLand: return "music.note"
+        case .blockbusterTealOrange: return "theatermasks.fill"
+        case .metroNeonNight: return "sparkles.rectangle.stack.fill"
+        case .noirTealGlow: return "moon.stars.fill"
+        case .urbanWarmCool: return "building.2.fill"
+        case .electricDusk: return "bolt.fill"
         }
     }
 }
