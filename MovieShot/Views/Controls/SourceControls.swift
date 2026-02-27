@@ -92,6 +92,7 @@ struct SourceControls: View {
             .rotationEffect(rotationAngle)
             .animation(.easeInOut, value: rotationAngle)
         }
+        .buttonStyle(.plain)
     }
 
     private var galleryControl: some View {
