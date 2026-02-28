@@ -698,8 +698,12 @@ final class EditorViewModel: ObservableObject {
             // Presets should define color science only; keep original luminance/contrast.
             let sourceTone = output
             let baseColorized = applyMoviePreset(preset, to: output)
-            let boostedColorized = applyColorShiftBoost(to: baseColorized, preset: preset)
-            output = preserveSourceLuminance(from: sourceTone, to: boostedColorized)
+            var colorized = applyColorShiftBoost(to: baseColorized, preset: preset)
+            if preset == .blockbusterTealOrange {
+                // Keep blockbuster oranges cleaner (less yellow push) by selectively reducing orange saturation.
+                colorized = applySelectiveOrangeSaturation(to: colorized, saturationScale: 0.85)
+            }
+            output = preserveSourceLuminance(from: sourceTone, to: colorized)
             output = applySubtleFilmContrast(to: output, preset: preset)
         }
 
@@ -2133,6 +2137,84 @@ final class EditorViewModel: ObservableObject {
         radial.setValue(CIColor(red: innerLuma, green: innerLuma, blue: innerLuma, alpha: 1), forKey: "inputColor0")
         radial.setValue(CIColor(red: outerLuma, green: outerLuma, blue: outerLuma, alpha: 1), forKey: "inputColor1")
         return radial.outputImage?.cropped(to: extent)
+    }
+
+    // MARK: - Selective orange saturation
+
+    /// 64³ colour cube mask for orange hues used by Blockbuster T&O.
+    nonisolated(unsafe) private static var blockbusterOrangeMaskCubeData: Data = {
+        let size = 64
+        var data = [Float32](repeating: 0, count: size * size * size * 4)
+
+        // CIColorCube iterates: b outermost, g middle, r innermost
+        for bi in 0..<size {
+            for gi in 0..<size {
+                for ri in 0..<size {
+                    let r = Float(ri) / Float(size - 1)
+                    let g = Float(gi) / Float(size - 1)
+                    let b = Float(bi) / Float(size - 1)
+
+                    let maxC = Swift.max(r, g, b)
+                    let minC = Swift.min(r, g, b)
+                    let delta = maxC - minC
+
+                    var h: Float = 0
+                    if delta > 0.001 {
+                        if maxC == r {
+                            h = (g - b) / delta
+                            if h < 0 { h += 6 }
+                        } else if maxC == g {
+                            h = 2 + (b - r) / delta
+                        } else {
+                            h = 4 + (r - g) / delta
+                        }
+                        h /= 6
+                    }
+
+                    let s = maxC > 0.001 ? delta / maxC : 0
+                    let v = maxC
+
+                    // Orange band ~18°...52°, with enough chroma/brightness.
+                    let isOrangeHue = h >= 0.05 && h <= 0.145
+                    let hasChroma = s > 0.14 && v > 0.10
+                    let mask: Float = (isOrangeHue && hasChroma) ? 1.0 : 0.0
+
+                    let idx = (bi * size * size + gi * size + ri) * 4
+                    data[idx + 0] = mask
+                    data[idx + 1] = mask
+                    data[idx + 2] = mask
+                    data[idx + 3] = 1.0
+                }
+            }
+        }
+
+        return Data(bytes: data, count: data.count * MemoryLayout<Float32>.size)
+    }()
+
+    nonisolated private static func blockbusterOrangeMask(image: CIImage) -> CIImage {
+        let size = 64
+        guard let cube = CIFilter(name: "CIColorCube") else { return image }
+        cube.setValue(size, forKey: "inputCubeDimension")
+        cube.setValue(blockbusterOrangeMaskCubeData, forKey: "inputCubeData")
+        cube.setValue(image, forKey: kCIInputImageKey)
+        return cube.outputImage ?? image
+    }
+
+    nonisolated private static func applySelectiveOrangeSaturation(to image: CIImage, saturationScale: CGFloat) -> CIImage {
+        let scale = max(0.0, saturationScale)
+        guard scale < 0.999 else { return image }
+
+        let controls = CIFilter.colorControls()
+        controls.inputImage = image
+        controls.saturation = Float(scale)
+        let reduced = controls.outputImage ?? image
+
+        let mask = blockbusterOrangeMask(image: image)
+        guard let blend = CIFilter(name: "CIBlendWithMask") else { return image }
+        blend.setValue(reduced, forKey: kCIInputImageKey)
+        blend.setValue(image, forKey: kCIInputBackgroundImageKey)
+        blend.setValue(mask, forKey: kCIInputMaskImageKey)
+        return blend.outputImage ?? image
     }
 
     // MARK: - Sin City red mask
