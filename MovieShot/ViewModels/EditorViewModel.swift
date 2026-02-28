@@ -697,8 +697,9 @@ final class EditorViewModel: ObservableObject {
         if applyPreset {
             // Presets should define color science only; keep original luminance/contrast.
             let sourceTone = output
-            let colorized = applyMoviePreset(preset, to: output)
-            output = preserveSourceLuminance(from: sourceTone, to: colorized)
+            let baseColorized = applyMoviePreset(preset, to: output)
+            let boostedColorized = applyColorShiftBoost(to: baseColorized, preset: preset)
+            output = preserveSourceLuminance(from: sourceTone, to: boostedColorized)
             output = applySubtleFilmContrast(to: output, preset: preset)
         }
 
@@ -775,6 +776,73 @@ final class EditorViewModel: ObservableObject {
         vibrance.setValue(image, forKey: kCIInputImageKey)
         vibrance.setValue(amount, forKey: "inputAmount")
         return vibrance.outputImage ?? image
+    }
+
+    /// Applies a small, shared color-shift intensifier (about +10%) for stylized presets.
+    /// This boosts hue separation via channel mixing and reduces "yellow from WB warmth"
+    /// by adding a slight cool/magenta compensation where needed.
+    nonisolated private static func applyColorShiftBoost(to image: CIImage, preset: MoviePreset) -> CIImage {
+        switch preset {
+        case .studioClean, .daylightRun:
+            return image
+        default:
+            break
+        }
+
+        var output = image
+
+        let matrix = CIFilter.colorMatrix()
+        matrix.inputImage = output
+
+        switch preset {
+        case .blockbusterTealOrange, .bladeRunner2049, .strangerThings, .dune, .drive, .madMax, .metroNeonNight, .electricDusk:
+            // Stronger teal/orange hue split without relying on warm WB alone.
+            matrix.rVector = CIVector(x: 1.02, y: 0.025, z: 0.00, w: 0.0)
+            matrix.gVector = CIVector(x: 0.00, y: 0.98, z: 0.035, w: 0.0)
+            matrix.bVector = CIVector(x: 0.00, y: 0.11, z: 0.89, w: 0.0)
+            matrix.aVector = CIVector(x: 0.0, y: 0.0, z: 0.0, w: 1.0)
+            matrix.biasVector = CIVector(x: 0.004, y: 0.001, z: 0.006, w: 0.0)
+            output = matrix.outputImage ?? output
+            output = applyVibrance(to: output, amount: 0.04)
+
+            // Pull warmth back from yellow toward orange.
+            let temp = CIFilter.temperatureAndTint()
+            temp.inputImage = output
+            temp.neutral = CIVector(x: 6500, y: 0)
+            temp.targetNeutral = CIVector(x: 6625, y: 2)
+            return temp.outputImage ?? output
+
+        case .matrix, .theBatman, .orderOfPhoenix, .seven, .noirTealGlow, .revenant:
+            // Stronger cool/teal shadow bias for darker stylized looks.
+            matrix.rVector = CIVector(x: 0.99, y: 0.015, z: 0.01, w: 0.0)
+            matrix.gVector = CIVector(x: 0.00, y: 0.98, z: 0.045, w: 0.0)
+            matrix.bVector = CIVector(x: 0.00, y: 0.12, z: 0.90, w: 0.0)
+            matrix.aVector = CIVector(x: 0.0, y: 0.0, z: 0.0, w: 1.0)
+            matrix.biasVector = CIVector(x: 0.000, y: 0.001, z: 0.005, w: 0.0)
+            output = matrix.outputImage ?? output
+            return applyVibrance(to: output, amount: 0.02)
+
+        case .inTheMoodForLove, .vertigo, .hero, .laLaLand, .urbanWarmCool:
+            // Warm stylized looks: boost hue richness and curb yellow cast.
+            matrix.rVector = CIVector(x: 1.03, y: 0.02, z: 0.00, w: 0.0)
+            matrix.gVector = CIVector(x: 0.01, y: 0.99, z: 0.02, w: 0.0)
+            matrix.bVector = CIVector(x: 0.00, y: 0.08, z: 0.91, w: 0.0)
+            matrix.aVector = CIVector(x: 0.0, y: 0.0, z: 0.0, w: 1.0)
+            matrix.biasVector = CIVector(x: 0.004, y: 0.002, z: 0.003, w: 0.0)
+            output = matrix.outputImage ?? output
+            output = applyVibrance(to: output, amount: 0.03)
+
+            let temp = CIFilter.temperatureAndTint()
+            temp.inputImage = output
+            temp.neutral = CIVector(x: 6500, y: 0)
+            temp.targetNeutral = CIVector(x: 6580, y: 3)
+            return temp.outputImage ?? output
+
+        case .sinCity:
+            return output
+        case .studioClean, .daylightRun:
+            return output
+        }
     }
 
     private struct FlatBaselineSettings {
